@@ -1,11 +1,63 @@
 {
-  "agents": { "demo-agent": { "adapter": "mock" } },
+  "agents": {
+    "demo-agent": {
+      "adapter": "mock",
+      "isolation": "trusted-local"
+    },
+    "mock-demo": {
+      "adapter": "mock",
+      "isolation": "trusted-local"
+    },
+    "codex-demo": {
+      "adapter": "codex",
+      "model": null,
+      "isolation": "trusted-local"
+    },
+    "claude-demo": {
+      "adapter": "claude",
+      "model": null,
+      "isolation": "trusted-local"
+    }
+  },
   "routes": [
     {
       "id": "demo-color",
-      "event": { "source": "local", "type": "demo.color" },
+      "event": {
+        "source": "local",
+        "type": "demo.color"
+      },
       "agent": "demo-agent",
       "title": "颜色试跑"
+    },
+    {
+      "id": "demo-mock",
+      "event": {
+        "source": "local",
+        "type": "demo.mock.color"
+      },
+      "agent": "mock-demo",
+      "title": "颜色试跑",
+      "instruction": "第一次请提问：请选择一个颜色，选项为蓝色和绿色。回答为蓝色时，完成结果的 message 必须精确等于「你选了蓝色，TaskCircuit 试跑通过」；回答为绿色时，message 必须精确等于「你选了绿色，TaskCircuit 试跑通过」。方括号是界定符，不是结果的一部分，结果末尾不加标点。"
+    },
+    {
+      "id": "demo-codex",
+      "event": {
+        "source": "local",
+        "type": "demo.codex.color"
+      },
+      "agent": "codex-demo",
+      "title": "颜色试跑",
+      "instruction": "第一次请提问：请选择一个颜色，选项为蓝色和绿色。回答为蓝色时，完成结果的 message 必须精确等于「你选了蓝色，TaskCircuit 试跑通过」；回答为绿色时，message 必须精确等于「你选了绿色，TaskCircuit 试跑通过」。方括号是界定符，不是结果的一部分，结果末尾不加标点。"
+    },
+    {
+      "id": "demo-claude",
+      "event": {
+        "source": "local",
+        "type": "demo.claude.color"
+      },
+      "agent": "claude-demo",
+      "title": "颜色试跑",
+      "instruction": "第一次请提问：请选择一个颜色，选项为蓝色和绿色。回答为蓝色时，完成结果的 message 必须精确等于「你选了蓝色，TaskCircuit 试跑通过」；回答为绿色时，message 必须精确等于「你选了绿色，TaskCircuit 试跑通过」。方括号是界定符，不是结果的一部分，结果末尾不加标点。"
     }
   ]
 }

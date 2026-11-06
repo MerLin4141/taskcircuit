@@ -39,7 +39,7 @@ export interface Question {
 export type AgentResult =
   | { type: "needs_input"; sessionId: string; request: Question }
   | { type: "completed"; sessionId: string; output: string }
-  | { type: "failed"; error: string };
+  | { type: "failed"; error: string | { code: string; message: string } };
 export class TaskCircuitError extends Error {
   constructor(
     public code: string,

@@ -80,6 +80,12 @@ export function createHub(
     if (!w) return missing();
     return {
       workItem: shape(w),
+      agentProfile: shape(
+        get(
+          "SELECT * FROM agent_profiles WHERE id=?",
+          String(w.agent_profile_id),
+        ),
+      ),
       executions: all(
         "SELECT * FROM executions WHERE work_item_id=? ORDER BY sequence",
         workId,
@@ -123,7 +129,13 @@ export function createHub(
         profile.adapter,
         profile.model ?? null,
         profile.reasoning ?? null,
-        json(profile.config ?? {}),
+        json({
+          ...(profile.config ?? {}),
+          isolation: profile.isolation ?? "trusted-local",
+          ...(profile.workspaceRoot
+            ? { workspaceRoot: profile.workspaceRoot }
+            : {}),
+        }),
       );
       run(
         "INSERT INTO work_items VALUES(?,?,?,?,?,?,?,?,?)",
@@ -135,7 +147,7 @@ export function createHub(
         time,
         time,
         null,
-        json({ eventId }),
+        json({ eventId, instruction: route.instruction ?? "" }),
       );
       run(
         "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,not_before,input,created_at) VALUES(?,?,?,?,?,?,?,?)",
@@ -255,6 +267,25 @@ export function createHub(
             )
           : null,
         leaseToken: token,
+        agentProfile: shape(
+          get(
+            "SELECT * FROM agent_profiles WHERE id=?",
+            String(e.agent_profile_id),
+          ),
+        ),
+        workItem: shape(
+          get("SELECT * FROM work_items WHERE id=?", String(e.work_item_id)),
+        ),
+        previousInteractions: all(
+          "SELECT * FROM interactions WHERE work_item_id=? AND status='resolved' ORDER BY created_at",
+          String(e.work_item_id),
+        ).map(shape),
+        event: shape(
+          get(
+            "SELECT events.* FROM events JOIN work_items ON json_extract(work_items.metadata, '$.eventId')=events.id WHERE work_items.id=?",
+            String(e.work_item_id),
+          ),
+        ),
       };
     });
     return result ?? reply.code(204).send();
@@ -306,6 +337,7 @@ export function createHub(
           !str(result.request.text) ||
           !str(result.request.key) ||
           !Array.isArray(result.request.options) ||
+          result.request.options.length === 0 ||
           !result.request.options.every(str))
       )
         return bad("问题格式不正确");
@@ -314,7 +346,13 @@ export function createHub(
         (!str(result.sessionId) || typeof result.output !== "string")
       )
         return bad("完成结果不正确");
-      if (result.type === "failed" && typeof result.error !== "string")
+      if (
+        result.type === "failed" &&
+        typeof result.error !== "string" &&
+        (!object(result.error) ||
+          !str(result.error.code) ||
+          !str(result.error.message))
+      )
         return bad("失败结果不正确");
       return tx(() => {
         const e = valid(req.params.id, b);
@@ -336,7 +374,12 @@ export function createHub(
             "INSERT INTO agent_sessions VALUES(?,?,?,?,?,?,?,?)",
             sid,
             String(e.work_item_id),
-            "mock",
+            String(
+              get(
+                "SELECT adapter FROM agent_profiles WHERE id=?",
+                String(e.agent_profile_id),
+              )?.adapter,
+            ),
             result.sessionId,
             "active",
             time,

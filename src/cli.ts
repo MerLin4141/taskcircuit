@@ -85,7 +85,12 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "work" && args[0]) {
-    print(await api(`/api/work-items/${encodeURIComponent(args[0])}`));
+    const detail = (await api(
+      `/api/work-items/${encodeURIComponent(args[0])}`,
+    )) as { agentSession?: { externalSessionId?: string } };
+    if (detail.agentSession?.externalSessionId)
+      detail.agentSession.externalSessionId = "present";
+    print(detail);
     return;
   }
   if (command === "answer" && args.length >= 2) {

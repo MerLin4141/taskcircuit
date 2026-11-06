@@ -1,20 +1,23 @@
-import type { AgentResult, AgentSession, Execution } from "./domain.js";
+import type { AgentResult } from "./domain.js";
 export interface AgentExecutionInput {
-  execution: Execution;
-  agentSession: AgentSession | null;
+  workItemId: string;
+  executionId: string;
+  workingDirectory: string;
+  instruction: string;
+  context: unknown;
+  previousAnswers: { question: unknown; answer: unknown }[];
+  externalSessionId: string | null;
+  model?: string | null;
 }
 export interface AgentAdapter {
   execute(input: AgentExecutionInput): Promise<AgentResult>;
 }
 export class MockAgentAdapter implements AgentAdapter {
-  async execute({
-    execution,
-    agentSession,
-  }: AgentExecutionInput): Promise<AgentResult> {
-    if (!agentSession)
+  async execute(input: AgentExecutionInput): Promise<AgentResult> {
+    if (!input.externalSessionId)
       return {
         type: "needs_input",
-        sessionId: `mock-session-${execution.workItemId}`,
+        sessionId: `mock-session-${input.workItemId}`,
         request: {
           title: "试跑：选一个颜色",
           text: "这是一次 TaskCircuit 试跑，选哪个都行。",
@@ -22,12 +25,12 @@ export class MockAgentAdapter implements AgentAdapter {
           key: "demo-color",
         },
       };
-    const answer = execution.input.answer;
+    const answer = input.previousAnswers.at(-1)?.answer;
     if (answer !== "蓝色" && answer !== "绿色")
       return { type: "failed", error: "回答不在可选项中" };
     return {
       type: "completed",
-      sessionId: agentSession.externalSessionId,
+      sessionId: input.externalSessionId,
       output: `你选了${answer}，TaskCircuit 试跑通过`,
     };
   }

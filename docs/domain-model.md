@@ -1,7 +1,7 @@
 # 领域模型
 
-Work Item 表示一件长期工作：active、waiting_input、waiting_schedule、completed、failed 或 cancelled。每个工作包含按 sequence 排列的 Execution，分别表示一次执行，状态为 queued、claimed、running、waiting_input、retry_wait、completed、failed 或 cancelled。
+Work Item 表示一件长期工作，包含按 sequence 排列的 Execution。Agent Session 属于一个 Work Item，TaskCircuit UUID 与外部 CLI session/thread ID 是不同标识。回答后原 Execution 保持 waiting_input，新的 queued Execution 引用原 Session。Interaction 保存 ask 和 answer，只能解决一次。
 
-Agent Session 属于一个 Work Item，记录 adapter 的外部会话 ID；同一工作回答后的下一次 Execution 引用同一个 Session。Interaction 关联创建它的 Execution，记录 ask、状态和回答；只能从 open 变为 resolved 一次。Event 是外部事实，与执行日志不同；配置路由把 source/type 精确匹配到 Agent Profile。Agent Profile 包含 adapter、model、reasoning 和配置。Worker 是通过 HTTP 租约执行工作的进程，不持有数据库连接。
+Event 按 source/type 匹配配置路由和 Agent Profile。Profile 指定 adapter、可选模型及 isolation；缺省 `trusted-local`。`sandboxed` 为未来契约，当前配置会拒绝。Profile 可指定绝对路径 `workspaceRoot`；未指定时使用系统临时目录下的工作区根。
 
-Phase 1 从 queued 原子领取为 running，到期后可重新领取；结果转为 waiting_input、completed 或 failed。回答在同一事务中解决问题并创建下一个 queued Execution；原 Execution 保持 waiting_input。
+Worker 经 HTTP 获得当前执行需要的数据。工作区根独立于状态根，独立目录不代表操作系统安全隔离。

@@ -1,5 +1,9 @@
-# 架构
+# 架构与信任边界
 
-Hub 是 Control Plane，负责匹配配置路由、状态事务、HTTP API 和 SQLite；Worker 是 Execution Plane，经 HTTP 领取任务并调用 Agent Adapter。CLI 仅使用 HTTP 操作 Hub；除 Hub 外的组件不访问数据库。配置只在 Hub 启动时读取。SQLite 使用 Node 自带的 node:sqlite 和显式 SQL。
+Control Plane：CLI / 未来 Desktop 通过 Hub 操作 Work Item、Execution、Agent Session 和 Interaction；Hub 是唯一的 SQLite 业务访问者。
 
-Hub 仅监听回环地址，V0.1 不提供身份认证。租约由 Hub 发放随机令牌并验证所有提交，以拒绝过期领取的结果。到期任务在下一次领取时恢复。
+Execution Plane：Worker 通过 HTTP 获得当前 Execution 的最小输入，经 AgentAdapter 调用 mock、Codex 或 Claude Code；Agent 在独立 workspace 工作。Worker 和 Adapter 不连接 SQLite。
+
+两侧目前的 trust boundary 是逻辑边界：进程同属一个 OS 用户，不声称防止其自行访问其他文件。未来 `sandboxed` 模式才要求 OS 或运行时强制隔离 Control Plane，并仅允许显式挂载的输入。详细约束见 [security-model.md](security-model.md)。
+
+Hub 仅监听回环地址，尚无身份认证；租约令牌拒绝过期领取的结果。

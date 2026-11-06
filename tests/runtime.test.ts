@@ -104,8 +104,15 @@ describe("TaskCircuit runtime", () => {
     const a = (await claim(hub)).json();
     const adapter = new MockAgentAdapter();
     const ask = await adapter.execute({
-      execution: a.execution,
-      agentSession: a.agentSession,
+      workItemId: a.execution.workItemId,
+      executionId: a.execution.id,
+      externalSessionId: a.agentSession?.externalSessionId ?? null,
+      workingDirectory: ".",
+      instruction: "",
+      context: {},
+      previousAnswers: a.execution.input.answer
+        ? [{ question: {}, answer: a.execution.input.answer }]
+        : [],
     });
     expect(ask.type).toBe("needs_input");
     expect((await submit(hub, a, ask)).statusCode).toBe(200);
@@ -142,8 +149,15 @@ describe("TaskCircuit runtime", () => {
     expect(b.execution.agentSessionId).toBe(sessionId);
     expect(b.agentSession.id).toBe(sessionId);
     const done = await adapter.execute({
-      execution: b.execution,
-      agentSession: b.agentSession,
+      workItemId: b.execution.workItemId,
+      executionId: b.execution.id,
+      externalSessionId: b.agentSession?.externalSessionId ?? null,
+      workingDirectory: ".",
+      instruction: "",
+      context: {},
+      previousAnswers: b.execution.input.answer
+        ? [{ question: {}, answer: b.execution.input.answer }]
+        : [],
     });
     expect(done).toMatchObject({
       type: "completed",
@@ -169,8 +183,15 @@ describe("TaskCircuit runtime", () => {
     const created = (await event(hub)).json();
     const c = (await claim(hub)).json();
     const result = await new MockAgentAdapter().execute({
-      execution: c.execution,
-      agentSession: c.agentSession,
+      workItemId: c.execution.workItemId,
+      executionId: c.execution.id,
+      externalSessionId: c.agentSession?.externalSessionId ?? null,
+      workingDirectory: ".",
+      instruction: "",
+      context: {},
+      previousAnswers: c.execution.input.answer
+        ? [{ question: {}, answer: c.execution.input.answer }]
+        : [],
     });
     await submit(hub, c, result);
     await hub.close();
