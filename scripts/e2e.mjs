@@ -62,6 +62,19 @@ try {
     );
   const session = detail.agentSession;
   const interaction = detail.interactions[0];
+  const inbox = await request(base, "/api/inbox");
+  if (!inbox.some((item) => item.interactionId === interaction.id))
+    throw new Error("inbox missing interaction");
+  await hub.dispatchNotifications();
+  const notifications = await request(base, "/api/notifications");
+  if (
+    !notifications.some(
+      (n) =>
+        n.interactionId === interaction.id &&
+        n.deliveries.some((d) => d.status === "sent"),
+    )
+  )
+    throw new Error("notification not delivered");
   if (
     !Array.isArray(interaction.request.options) ||
     !interaction.request.options.includes("蓝色") ||

@@ -16,6 +16,8 @@ export interface Route {
   title: string;
   instruction?: string;
   retryPolicy?: RetryPolicy;
+  notify?: string[];
+  notifyOnCompleted?: boolean;
 }
 export interface ConfigSchedule {
   id: string;
@@ -27,8 +29,10 @@ export interface Config {
   agents: Record<string, AgentProfile>;
   routes: Route[];
   schedules?: ConfigSchedule[];
+  channels?: Record<string, { type: "local-console" }>;
 }
 export const defaultConfig: Config = {
+  channels: { local: { type: "local-console" } },
   agents: {
     "demo-agent": { adapter: "mock", isolation: "trusted-local" },
     "mock-demo": { adapter: "mock", isolation: "trusted-local" },
@@ -109,6 +113,11 @@ export function loadConfig(path: string): Config {
       !route.id ||
       typeof route.title !== "string" ||
       (route.retryPolicy !== undefined && !validPolicy(route.retryPolicy)) ||
+      (route.notify !== undefined &&
+        (!Array.isArray(route.notify) ||
+          !route.notify.every((x) => typeof x === "string" && !!x))) ||
+      (route.notifyOnCompleted !== undefined &&
+        typeof route.notifyOnCompleted !== "boolean") ||
       (route.instruction !== undefined &&
         typeof route.instruction !== "string") ||
       !route.event ||
@@ -123,6 +132,23 @@ export function loadConfig(path: string): Config {
     ids.add(route.id);
     matches.add(match);
   }
+  if (
+    config.channels !== undefined &&
+    (!config.channels ||
+      typeof config.channels !== "object" ||
+      Array.isArray(config.channels) ||
+      Object.entries(config.channels).some(
+        ([id, c]) => !id || !c || c.type !== "local-console",
+      ))
+  )
+    throw new Error("通知通道配置无效");
+  for (const route of config.routes)
+    if (
+      route.notify?.some(
+        (id) => !(config.channels ?? { local: { type: "local-console" } })[id],
+      )
+    )
+      throw new Error("通知通道不存在");
   if (config.schedules !== undefined) {
     if (!Array.isArray(config.schedules)) throw new Error("计划配置无效");
     const scheduleIds = new Set<string>();

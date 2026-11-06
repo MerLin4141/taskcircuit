@@ -207,7 +207,7 @@ describe("TaskCircuit runtime", () => {
     ])
       expect(
         Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n),
-      ).toBe(table === "schema_migrations" ? 2 : 1);
+      ).toBe(table === "schema_migrations" ? 3 : 1);
     expect(created.workItem.id).toBeTruthy();
     db.close();
     rmSync(dir, { recursive: true, force: true });

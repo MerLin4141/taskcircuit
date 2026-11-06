@@ -167,12 +167,84 @@ async function main(): Promise<void> {
     }
     throw new Error("计划命令不正确");
   }
+  if (command === "inbox") {
+    const entries = (await api("/api/inbox")) as {
+      interactionId: string;
+      workTitle: string;
+      request: { title: string; options: string[] };
+      createdAt: string;
+    }[];
+    for (const entry of entries) {
+      const age = Math.max(
+        0,
+        Math.floor((Date.now() - Date.parse(entry.createdAt)) / 1000),
+      );
+      console.log(
+        `${entry.interactionId} | ${entry.workTitle} | ${entry.request.title} | ${entry.request.options.join(" / ")} | ${age} 秒前`,
+      );
+    }
+    if (!entries.length) console.log("暂无待回答问题");
+    return;
+  }
+  if (command === "watch") {
+    const after = args.indexOf("--after");
+    const cursor = after >= 0 ? args[after + 1] : "0";
+    if (!cursor || !/^\d+$/.test(cursor)) throw new Error("游标不正确");
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.once("SIGINT", stop);
+    try {
+      const response = await fetch(
+        new URL(`/api/stream?after=${cursor}`, base),
+        { signal: controller.signal },
+      );
+      if (!response.ok)
+        throw new Error(
+          `连接变化流失败: ${response.status} ${await response.text()}`,
+        );
+      if (!response.body) throw new Error("变化流不可用");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let end;
+        while ((end = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+          const id = frame.match(/^id: (.+)$/m)?.[1];
+          const event = frame.match(/^event: (.+)$/m)?.[1];
+          const data = frame.match(/^data: (.+)$/m)?.[1];
+          if (event === "resync") {
+            console.error("变化流游标已过期，请刷新状态后重新连接");
+            return;
+          }
+          if (event === "change" && id && data) {
+            const change = JSON.parse(data) as {
+              type: string;
+              payload?: { status?: string };
+            };
+            console.log(
+              `[${id}] ${change.type}${change.payload?.status ? " → " + change.payload.status : ""}`,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      process.off("SIGINT", stop);
+    }
+    return;
+  }
   if (command === "status") {
     print(await api("/api/work-items"));
     return;
   }
   console.log(
-    "用法: taskcircuit hub | worker [--once] | emit <事件类型> | work <工作ID> | answer <问题ID> <回答> | status | schedule list/add/pause/resume/cancel",
+    "用法: taskcircuit hub | worker [--once] | emit <事件类型> | work <工作ID> | answer <问题ID> <回答> | status | inbox | watch [--after 序号] | schedule list/add/pause/resume/cancel",
   );
 }
 main().catch((e) => {

@@ -13,3 +13,5 @@ V0.1 的 Codex、Claude Code 和 mock 使用 `trusted-local`：CLI Agent 由用�
 `sandboxed` 将要求独立执行环境；只暴露 workspace 和显式授权的输入，不挂载 Control Plane；工作区采用允许列表，凭据最小授权，并对挂载和网络策略作明确配置。实现方式可在未来评估容器、虚拟机、操作系统沙箱、专用身份或远程执行器。本版拒绝配置 `sandboxed`，不会默默降级为 trusted-local。
 
 Scheduler 仅将计划配置的事件 payload 交给 Event Router；内部计划、数据库路径和状态根不进入 Agent context。Retry 次数只传给 Adapter，不放入 Agent 提示词。
+
+Runtime Change 仅保存最少状态，不包含完整提示词、环境、外部 session ID 或内部路径；通知只使用任务标题和通用通知文字。SSE、Inbox 和通知接口沿用仅回环监听的 trusted-local 边界，不提供公网认证。

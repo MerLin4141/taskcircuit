@@ -5,6 +5,11 @@ import { migrate } from "./migration.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
 import {
+  LocalConsoleChannel,
+  type HubOptions,
+  type NotificationChannel,
+} from "./notifications.js";
+import {
   nextCron,
   retryDelay,
   validPolicy,
@@ -44,6 +49,7 @@ export function createHub(
   config: Config,
   clock: (() => number) | Clock = systemClock,
   pollIntervalMs = 1000,
+  options: HubOptions = {},
 ) {
   const clockNow = typeof clock === "function" ? clock : () => clock.now();
   const db = new DatabaseSync(path);
@@ -70,6 +76,350 @@ export function createHub(
       throw e;
     }
   };
+  const channels: Record<string, NotificationChannel> =
+    options.channels ??
+    Object.fromEntries(
+      Object.entries(
+        config.channels ?? { local: { type: "local-console" } },
+      ).map(([id]) => [id, new LocalConsoleChannel(id)]),
+    );
+  const createNotification = (
+    workId: string,
+    interactionId: string | null,
+    kind: "interaction_required" | "work_item_failed" | "work_item_completed",
+    title: string,
+    time: string,
+  ) => {
+    const work = get("SELECT metadata FROM work_items WHERE id=?", workId);
+    if (!work) return;
+    const metadata = JSON.parse(String(work.metadata)) as Row;
+    const notify = Array.isArray(metadata.notify)
+      ? metadata.notify.filter(str)
+      : Object.keys(channels);
+    if (kind === "work_item_completed" && metadata.notifyOnCompleted !== true)
+      return;
+    const id = randomUUID();
+    const severity =
+      kind === "interaction_required"
+        ? "attention"
+        : kind === "work_item_failed"
+          ? "error"
+          : "info";
+    const body =
+      kind === "interaction_required"
+        ? "有问题需要回答"
+        : kind === "work_item_failed"
+          ? "工作执行失败"
+          : "工作已完成";
+    run(
+      "INSERT INTO notifications VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      id,
+      kind,
+      severity,
+      workId,
+      interactionId,
+      title,
+      body,
+      "open",
+      time,
+      null,
+      `${kind}:${interactionId ?? workId}`,
+    );
+    for (const channelId of notify)
+      run(
+        "INSERT INTO notification_deliveries(id,notification_id,channel_id,status,attempt,not_before,created_at) VALUES(?,?,?,?,?,?,?)",
+        randomUUID(),
+        id,
+        channelId,
+        "queued",
+        0,
+        time,
+        time,
+      );
+  };
+  const resolveNotifications = (where: string, id: string, time: string) => {
+    const records = all(
+      `SELECT id FROM notifications WHERE ${where}=? AND status='open'`,
+      id,
+    );
+    for (const row of records) {
+      run(
+        "UPDATE notifications SET status='resolved',resolved_at=? WHERE id=?",
+        time,
+        String(row.id),
+      );
+      run(
+        "UPDATE notification_deliveries SET status='cancelled',lease_token=NULL WHERE notification_id=? AND status IN ('queued','claimed')",
+        String(row.id),
+      );
+    }
+  };
+  const readChanges = (after: number, limit = 200) =>
+    all(
+      "SELECT * FROM runtime_changes WHERE sequence>? ORDER BY sequence LIMIT ?",
+      after,
+      limit,
+    ).map(shape);
+  const streamHead = () =>
+    Number(
+      get("SELECT seq FROM sqlite_sequence WHERE name='runtime_changes'")
+        ?.seq ?? 0,
+    );
+  const pruneChanges = (maxChanges = 10000) =>
+    tx(() => {
+      if (!Number.isSafeInteger(maxChanges) || maxChanges < 1)
+        throw new Error("保留条数不正确");
+      const cutoff = get(
+        "SELECT sequence FROM runtime_changes ORDER BY sequence DESC LIMIT 1 OFFSET ?",
+        maxChanges,
+      );
+      if (!cutoff) return 0;
+      const sequence = Number(cutoff.sequence);
+      const deleted = Number(
+        run("DELETE FROM runtime_changes WHERE sequence<=?", sequence).changes,
+      );
+      run(
+        "UPDATE stream_retention SET pruned_through=MAX(pruned_through,?) WHERE id=1",
+        sequence,
+      );
+      return deleted;
+    });
+  const inbox = () =>
+    all(
+      "SELECT i.id AS interaction_id,i.work_item_id,w.title AS work_title,i.request,i.created_at FROM interactions i JOIN work_items w ON w.id=i.work_item_id WHERE i.status='open' ORDER BY i.created_at,i.id LIMIT 100",
+    ).map(shape);
+  let dispatching: Promise<void> | undefined;
+  const dispatchNotifications = (): Promise<void> => {
+    if (dispatching) return dispatching;
+    dispatching = (async () => {
+      const claimed = tx(() => {
+        const time = now();
+        run(
+          "UPDATE notification_deliveries SET status='failed',lease_token=NULL,last_error='投递租约已过期' WHERE status='claimed' AND lease_expires_at<=? AND attempt>=3",
+          time,
+        );
+        const row = get(
+          "SELECT d.*,n.kind,n.severity,n.work_item_id,n.interaction_id,n.title,n.body FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id WHERE n.status='open' AND ((d.status='queued' AND d.not_before<=?) OR (d.status='claimed' AND d.lease_expires_at<=?)) ORDER BY d.created_at,d.id LIMIT 1",
+          time,
+          time,
+        );
+        if (!row) return null;
+        const token = randomUUID();
+        run(
+          "UPDATE notification_deliveries SET status='claimed',attempt=attempt+1,claimed_by=?,lease_token=?,lease_expires_at=? WHERE id=?",
+          "dispatcher",
+          token,
+          new Date(clockNow() + 30000).toISOString(),
+          String(row.id),
+        );
+        return { row, token };
+      });
+      if (!claimed) return;
+      const { row, token } = claimed;
+      try {
+        const channel = channels[String(row.channel_id)];
+        if (!channel) throw new Error("channel unavailable");
+        const result = await channel.deliver({
+          deliveryId: String(row.id),
+          notificationId: String(row.notification_id),
+          kind: String(row.kind),
+          severity: String(row.severity),
+          workItemId: String(row.work_item_id),
+          interactionId:
+            row.interaction_id === null ? null : String(row.interaction_id),
+          title: String(row.title),
+          body: String(row.body),
+        });
+        if (!result.ok) throw new Error("delivery failed");
+        tx(() => {
+          run(
+            "UPDATE notification_deliveries SET status='sent',sent_at=?,lease_token=NULL WHERE id=? AND status='claimed' AND lease_token=? AND lease_expires_at>?",
+            now(),
+            String(row.id),
+            token,
+            now(),
+          );
+        });
+      } catch {
+        tx(() => {
+          const current = get(
+            "SELECT attempt FROM notification_deliveries WHERE id=? AND status='claimed' AND lease_token=? AND lease_expires_at>?",
+            String(row.id),
+            token,
+            now(),
+          );
+          if (!current) return;
+          const exhausted = Number(current.attempt) >= 3;
+          run(
+            "UPDATE notification_deliveries SET status=?,not_before=?,last_error=?,lease_token=NULL WHERE id=?",
+            exhausted ? "failed" : "queued",
+            new Date(clockNow() + 5000).toISOString(),
+            "投递失败",
+            String(row.id),
+          );
+        });
+      }
+    })().finally(() => {
+      dispatching = undefined;
+    });
+    return dispatching;
+  };
+  const streams = new Set<() => void>();
+  Object.assign(hub, {
+    readChanges,
+    pruneChanges,
+    dispatchNotifications,
+    getStreamCount: () => streams.size,
+  });
+  hub.get("/api/stream/head", async () => ({ sequence: streamHead() }));
+  hub.get("/api/inbox", async () => inbox());
+  hub.get("/api/notifications", async () =>
+    all("SELECT * FROM notifications ORDER BY created_at,id").map((n) => ({
+      ...shape(n),
+      deliveries: all(
+        "SELECT * FROM notification_deliveries WHERE notification_id=? ORDER BY created_at,id",
+        String(n.id),
+      ).map(shape),
+    })),
+  );
+  hub.get("/api/state", async () => ({
+    recentWorkItems: all(
+      "SELECT id,title,status,created_at,updated_at FROM work_items ORDER BY updated_at DESC LIMIT 50",
+    ).map(shape),
+    activeWorkItems: all(
+      "SELECT id,title,status,created_at,updated_at FROM work_items WHERE status IN ('active','waiting_input','waiting_schedule') ORDER BY updated_at DESC LIMIT 50",
+    ).map(shape),
+    inbox: inbox(),
+    activeSchedules: all(
+      "SELECT id,kind,status,owner_kind,owner_id,reason,expression,timezone,next_fire_at,last_fire_at FROM schedules WHERE status='active' ORDER BY next_fire_at LIMIT 50",
+    ).map(shape),
+    sequence: streamHead(),
+  }));
+  hub.get<{ Querystring: { after?: string } }>(
+    "/api/stream",
+    async (req, reply) => {
+      const raw = req.query.after ?? req.headers["last-event-id"] ?? "0";
+      if (
+        typeof raw !== "string" ||
+        !/^\d+$/.test(raw) ||
+        !Number.isSafeInteger(Number(raw))
+      )
+        return reply.code(400).send({ error: "invalid_stream_cursor" });
+      let cursor = Number(raw);
+      const pruned = Number(
+        get("SELECT pruned_through FROM stream_retention WHERE id=1")
+          ?.pruned_through ?? 0,
+      );
+      if (cursor < pruned) {
+        const oldest = get(
+          "SELECT MIN(sequence) AS sequence FROM runtime_changes",
+        );
+        return reply.code(409).send({
+          error: "stream_cursor_expired",
+          oldestAvailableSequence: oldest?.sequence ?? null,
+        });
+      }
+      reply.hijack();
+      const response = reply.raw;
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      });
+      response.write(": connected\n\n");
+      let blocked = false;
+      let closed = false;
+      const pump = () => {
+        if (blocked || closed) return;
+        try {
+          const boundary = Number(
+            get("SELECT pruned_through FROM stream_retention WHERE id=1")
+              ?.pruned_through ?? 0,
+          );
+          if (cursor < boundary) {
+            response.write(
+              'event: resync\ndata: {"error":"stream_cursor_expired"}\n\n',
+            );
+            response.end();
+            return;
+          }
+          for (const item of readChanges(cursor)) {
+            if (!item) continue;
+            cursor = Number(item.sequence);
+            if (
+              !response.write(
+                `id: ${cursor}\nevent: change\ndata: ${JSON.stringify(item)}\n\n`,
+              )
+            ) {
+              blocked = true;
+              break;
+            }
+          }
+        } catch {
+          response.destroy();
+        }
+      };
+      const onDrain = () => {
+        blocked = false;
+        pump();
+      };
+      response.on("drain", onDrain);
+      const poll = setInterval(pump, options.streamPollMs ?? 100);
+      const heartbeat = setInterval(() => {
+        if (!blocked && !closed && !response.write(": ping\n\n"))
+          blocked = true;
+      }, options.streamHeartbeatMs ?? 15000);
+      poll.unref();
+      heartbeat.unref();
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(poll);
+        clearInterval(heartbeat);
+        response.off("drain", onDrain);
+        streams.delete(cleanup);
+        if (!response.destroyed && !response.writableEnded) response.end();
+      };
+      streams.add(cleanup);
+      response.once("close", cleanup);
+      pump();
+      return reply;
+    },
+  );
+  let dispatcherTimer: ReturnType<typeof setInterval> | undefined;
+  let maintenanceTimer: ReturnType<typeof setInterval> | undefined;
+  hub.addHook("onReady", async () => {
+    const ms = options.dispatcherPollMs ?? 1000;
+    if (ms > 0) {
+      dispatcherTimer = setInterval(() => {
+        void dispatchNotifications().catch(() =>
+          hub.log.error("notification dispatch failed"),
+        );
+      }, ms);
+      dispatcherTimer.unref();
+      void dispatchNotifications().catch(() =>
+        hub.log.error("notification dispatch failed"),
+      );
+    }
+    pruneChanges();
+    maintenanceTimer = setInterval(() => {
+      try {
+        pruneChanges();
+      } catch {
+        hub.log.error("stream maintenance failed");
+      }
+    }, 60000);
+    maintenanceTimer.unref();
+  });
+  hub.addHook("preClose", async () => {
+    for (const close of [...streams]) close();
+  });
+  hub.addHook("onClose", async () => {
+    if (dispatcherTimer) clearInterval(dispatcherTimer);
+    if (maintenanceTimer) clearInterval(maintenanceTimer);
+    for (const close of streams) close();
+    if (dispatching) await dispatching;
+  });
   const bad = (message: string): never => {
     throw new TaskCircuitError("invalid_request", message, 400);
   };
@@ -259,6 +609,7 @@ export function createHub(
           time,
           req.params.id,
         );
+        resolveNotifications("work_item_id", req.params.id, time);
         run(
           "UPDATE schedules SET status='cancelled',updated_at=? WHERE owner_kind='work_item' AND owner_id=? AND status IN ('active','paused')",
           time,
@@ -437,6 +788,10 @@ export function createHub(
         eventId,
         instruction: route.instruction ?? "",
         retryPolicy: route.retryPolicy ?? null,
+        notify:
+          route.notify ??
+          Object.keys(config.channels ?? { local: { type: "local-console" } }),
+        notifyOnCompleted: route.notifyOnCompleted ?? false,
       }),
     );
     run(
@@ -505,6 +860,7 @@ export function createHub(
           time,
           String(q.id),
         );
+        resolveNotifications("interaction_id", String(q.id), time);
         run(
           "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,agent_session_id,not_before,input,created_at,trigger_kind,parent_execution_id,retry_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
           randomUUID(),
@@ -729,9 +1085,10 @@ export function createHub(
           );
         } else if (result.type === "needs_input") {
           const q = result.request as Row;
+          const interactionId = randomUUID();
           run(
             "INSERT INTO interactions VALUES(?,?,?,?,?,?,?,?,?,?)",
-            randomUUID(),
+            interactionId,
             String(e.work_item_id),
             String(e.id),
             "ask",
@@ -741,6 +1098,13 @@ export function createHub(
             null,
             time,
             null,
+          );
+          createNotification(
+            String(e.work_item_id),
+            interactionId,
+            "interaction_required",
+            String(q.title),
+            time,
           );
           run(
             "UPDATE executions SET status='waiting_input',agent_session_id=?,finished_at=?,lease_token=NULL WHERE id=?",
@@ -800,7 +1164,7 @@ export function createHub(
               time,
               String(e.work_item_id),
             );
-          } else
+          } else {
             run(
               "UPDATE work_items SET status=?,updated_at=?,completed_at=? WHERE id=?",
               status,
@@ -808,11 +1172,33 @@ export function createHub(
               status === "completed" ? time : null,
               String(e.work_item_id),
             );
+            createNotification(
+              String(e.work_item_id),
+              null,
+              status === "failed" ? "work_item_failed" : "work_item_completed",
+              String(work?.title ?? "工作"),
+              time,
+            );
+          }
         }
         return { ok: true };
       });
     },
   );
+  tx(() => {
+    for (const row of all(
+      "SELECT i.id,i.work_item_id,i.request FROM interactions i WHERE i.status='open' AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.interaction_id=i.id AND n.kind='interaction_required')",
+    )) {
+      const request = JSON.parse(String(row.request)) as Row;
+      createNotification(
+        String(row.work_item_id),
+        String(row.id),
+        "interaction_required",
+        String(request.title ?? "需要回答"),
+        now(),
+      );
+    }
+  });
   tx(() => {
     for (const entry of config.schedules ?? []) {
       if (!get("SELECT id FROM schedules WHERE config_key=?", entry.id)) {
@@ -837,5 +1223,11 @@ export function createHub(
   hub.addHook("onClose", async () => {
     db.close();
   });
-  return hub as typeof hub & { tickScheduler: () => number };
+  return hub as typeof hub & {
+    tickScheduler: () => number;
+    readChanges: (after: number, limit?: number) => (Row | null)[];
+    pruneChanges: (maxChanges?: number) => number;
+    dispatchNotifications: () => Promise<void>;
+    getStreamCount: () => number;
+  };
 }
