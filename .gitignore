@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.taskcircuit/
+*.sqlite*
+*.db
+*.db-shm
+*.db-wal
+logs/
+tmp/
+temp/
+.env
+.env.*
+*.pem
+*.key
+credentials*
+taskcircuit.local.json

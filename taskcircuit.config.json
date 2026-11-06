@@ -1,0 +1,11 @@
+{
+  "agents": { "demo-agent": { "adapter": "mock" } },
+  "routes": [
+    {
+      "id": "demo-color",
+      "event": { "source": "local", "type": "demo.color" },
+      "agent": "demo-agent",
+      "title": "颜色试跑"
+    }
+  ]
+}
