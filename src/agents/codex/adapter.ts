@@ -54,6 +54,15 @@ export class CodexAdapter implements AgentAdapter {
     if (!session || !text || (previous && session !== previous))
       throw new AgentProtocolError();
     const parsed = parseResponse(text);
+    if (parsed.kind === "later")
+      return {
+        type: "later",
+        sessionId: session as string,
+        message: parsed.message,
+        ...(parsed.afterSeconds !== undefined
+          ? { afterSeconds: parsed.afterSeconds }
+          : { runAt: parsed.runAt }),
+      };
     if (parsed.kind === "ask")
       return {
         type: "needs_input",
@@ -64,7 +73,12 @@ export class CodexAdapter implements AgentAdapter {
       return { type: "completed", sessionId: session, output: parsed.message };
     return {
       type: "failed",
-      error: { code: "agent_reported_failure", message: parsed.message },
+      sessionId: session as string,
+      error: {
+        code: "agent_reported_failure",
+        message: parsed.message,
+        retryable: parsed.retryable ?? false,
+      },
     };
   }
 }

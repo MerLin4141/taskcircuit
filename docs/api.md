@@ -1,14 +1,14 @@
 # HTTP API
 
-请求和响应为 JSON，时间为 UTC ISO-8601。错误格式为 `{ "error": { "code": "...", "message": "..." } }`。
+请求和响应为 JSON，时间使用带时区的 ISO-8601，持久化为 UTC。错误格式为 `{ "error": { "code": "...", "message": "..." } }`。Hub 仅用于可信本机。
 
 - `GET /api/health`：服务状态。
-- `POST /api/events`：`{source,type,payload}`；路由匹配后创建 Event、Work Item 和首个 Execution。
-- `GET /api/work-items`：最近工作、最新执行、待回答问题。
-- `GET /api/work-items/:id`：工作、Profile、执行、Session 和交互。CLI 的 `work` 输出隐藏完整外部会话 ID。
-- `POST /api/executions/claim`：`{workerId}`；返回执行、profile、事件、历史回答、会话和租约令牌；无任务时 204。
-- `POST /api/executions/:id/heartbeat`：`{workerId,leaseToken}`。
-- `POST /api/executions/:id/result`：`{workerId,leaseToken,result}`；支持 completed、needs_input、failed。旧租约返回 409。
-- `POST /api/interactions/:id/answer`：`{answer}`；重复回答返回 409，回答在事务中创建恢复执行。
+- `POST /api/events`：`{source,type,payload}`，匹配路由后创建 Event 与工作。
+- `GET /api/work-items`、`GET /api/work-items/:id`：查看工作及执行、会话、交互和计划；`POST /api/work-items/:id/cancel` 取消工作。
+- `POST /api/executions/claim`、`POST /api/executions/:id/heartbeat`、`POST /api/executions/:id/result`：领取、续租和提交 `completed`、`needs_input`、`later` 或 `failed`。
+- `POST /api/interactions/:id/answer`：回答后创建恢复执行。
+- `GET /api/schedules`、`GET /api/schedules/:id`：列出或查看计划。
+- `POST /api/schedules`：`{kind:"once",runAt,event:{source,type,payload}}` 或 `{kind:"cron",expression,timezone,event:{source,type,payload}}`；时区缺省 UTC。
+- `POST /api/schedules/:id/pause`、`/resume` 和 `DELETE /api/schedules/:id`：暂停、恢复和取消用户计划。Work Item 内部计划随工作状态管理。
 
-API 暴露外部会话 ID 给 Worker；仅用于可信本机，不应暴露到公网。
+计划触发进入 Event Router；API 不允许任意指定 Agent 或执行命令。

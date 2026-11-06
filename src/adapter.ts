@@ -8,12 +8,53 @@ export interface AgentExecutionInput {
   previousAnswers: { question: unknown; answer: unknown }[];
   externalSessionId: string | null;
   model?: string | null;
+  retryAttempt?: number;
 }
 export interface AgentAdapter {
   execute(input: AgentExecutionInput): Promise<AgentResult>;
 }
 export class MockAgentAdapter implements AgentAdapter {
   async execute(input: AgentExecutionInput): Promise<AgentResult> {
+    const context = input.context as { type?: string } | null;
+    if (context?.type === "demo.later")
+      return input.externalSessionId
+        ? {
+            type: "completed",
+            sessionId: input.externalSessionId,
+            output: "TaskCircuit Later 试跑通过",
+          }
+        : {
+            type: "later",
+            sessionId: `mock-session-${input.workItemId}`,
+            message: "稍后继续",
+            afterSeconds: 2,
+          };
+    if (
+      context?.type === "demo.retry" ||
+      context?.type === "demo.retry.exhaust"
+    ) {
+      if (context.type === "demo.retry.exhaust" || !input.retryAttempt)
+        return {
+          type: "failed",
+          error: {
+            code: "agent_execution",
+            message: "模拟临时故障",
+            retryable: true,
+          },
+        };
+      return {
+        type: "completed",
+        sessionId:
+          input.externalSessionId ?? `mock-session-${input.workItemId}`,
+        output: "TaskCircuit Retry 试跑通过",
+      };
+    }
+    if (context?.type === "demo.cron")
+      return {
+        type: "completed",
+        sessionId: `mock-session-${input.workItemId}`,
+        output: "TaskCircuit Cron 试跑通过",
+      };
     if (!input.externalSessionId)
       return {
         type: "needs_input",

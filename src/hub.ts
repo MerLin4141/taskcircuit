@@ -4,6 +4,14 @@ import { randomUUID } from "node:crypto";
 import { migrate } from "./migration.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
+import {
+  nextCron,
+  retryDelay,
+  validPolicy,
+  validInstant,
+  systemClock,
+  type Clock,
+} from "./scheduling.js";
 
 type Row = Record<string, unknown>;
 const object = (x: unknown): x is Row =>
@@ -34,10 +42,13 @@ const str = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 export function createHub(
   path: string,
   config: Config,
-  clock: () => number = Date.now,
+  clock: (() => number) | Clock = systemClock,
+  pollIntervalMs = 1000,
 ) {
+  const clockNow = typeof clock === "function" ? clock : () => clock.now();
   const db = new DatabaseSync(path);
   db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
+  db.exec("PRAGMA busy_timeout=5000");
   migrate(db);
   const hub = Fastify({ logger: false });
   const run = (sql: string, ...args: SQLInputValue[]) =>
@@ -46,8 +57,8 @@ export function createHub(
     db.prepare(sql).get(...args) as Row | undefined;
   const all = (sql: string, ...args: SQLInputValue[]) =>
     db.prepare(sql).all(...args) as Row[];
-  const now = () => new Date(clock()).toISOString();
-  const expiry = () => new Date(clock() + 30000).toISOString();
+  const now = () => new Date(clockNow()).toISOString();
+  const expiry = () => new Date(clockNow() + 30000).toISOString();
   const tx = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -93,6 +104,10 @@ export function createHub(
       agentSession: shape(
         get("SELECT * FROM agent_sessions WHERE work_item_id=?", workId),
       ),
+      schedules: all(
+        "SELECT * FROM schedules WHERE owner_kind='work_item' AND owner_id=? ORDER BY created_at",
+        workId,
+      ).map(shape),
       interactions: all(
         "SELECT * FROM interactions WHERE work_item_id=? ORDER BY created_at",
         workId,
@@ -100,74 +115,352 @@ export function createHub(
     };
   };
   hub.get("/api/health", async () => ({ ok: true, service: "taskcircuit" }));
-  hub.post("/api/events", async (req) => {
-    const b = req.body;
-    if (!object(b) || !str(b.source) || !str(b.type) || !object(b.payload))
-      return bad("事件格式不正确");
+  const scheduleWork = (
+    workId: string,
+    parentId: string,
+    reason: "later" | "retry",
+    due: string,
+    time: string,
+  ) => {
+    run(
+      "INSERT INTO schedules(id,kind,status,owner_kind,owner_id,reason,parent_execution_id,run_at,next_fire_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      randomUUID(),
+      "once",
+      "active",
+      "work_item",
+      workId,
+      reason,
+      parentId,
+      due,
+      due,
+      time,
+      time,
+    );
+  };
+  const parseUserSchedule = (b: Row) => {
+    if (
+      !["once", "cron"].includes(String(b.kind)) ||
+      !object(b.event) ||
+      !str(b.event.source) ||
+      !str(b.event.type) ||
+      !object(b.event.payload)
+    )
+      return bad("计划格式不正确");
+    const eventValue = b.event as Row;
+    if (
+      !config.routes.some(
+        (r) =>
+          r.event.source === eventValue.source &&
+          r.event.type === eventValue.type,
+      )
+    )
+      return bad("计划事件没有匹配路由");
+    const time = now();
+    let due: string;
+    let expr: string | null = null;
+    let zone: string | null = null;
+    if (b.kind === "once") {
+      if (!validInstant(b.runAt)) return bad("一次性计划时间不正确");
+      due = new Date(b.runAt).toISOString();
+    } else {
+      if (!str(b.expression) || !(b.timezone === undefined || str(b.timezone)))
+        return bad("Cron 配置不正确");
+      expr = b.expression;
+      zone = (b.timezone as string | undefined) ?? "UTC";
+      try {
+        due = nextCron(expr, zone, clockNow());
+      } catch {
+        return bad("Cron 表达式或时区无效");
+      }
+    }
+    const event = b.event as Row;
+    const id = randomUUID();
+    run(
+      "INSERT INTO schedules(id,kind,status,owner_kind,reason,source,event_type,payload,expression,timezone,run_at,next_fire_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      id,
+      String(b.kind),
+      "active",
+      "user",
+      "event",
+      String(event.source),
+      String(event.type),
+      json(event.payload),
+      expr,
+      zone,
+      b.kind === "once" ? due : null,
+      due,
+      time,
+      time,
+    );
+    return shape(get("SELECT * FROM schedules WHERE id=?", id));
+  };
+  hub.get("/api/schedules", async () =>
+    all("SELECT * FROM schedules ORDER BY created_at").map(shape),
+  );
+  hub.post("/api/schedules", async (req) => {
+    if (!object(req.body)) return bad("计划格式不正确");
+    return tx(() => parseUserSchedule(req.body as Row));
+  });
+  hub.get<{ Params: { id: string } }>(
+    "/api/schedules/:id",
+    async (req) =>
+      shape(get("SELECT * FROM schedules WHERE id=?", req.params.id)) ??
+      missing(),
+  );
+  for (const action of ["pause", "resume"] as const)
+    hub.post<{ Params: { id: string } }>(
+      `/api/schedules/:id/${action}`,
+      async (req) =>
+        tx(() => {
+          const s = get("SELECT * FROM schedules WHERE id=?", req.params.id);
+          if (!s) return missing();
+          if (
+            s.owner_kind !== "user" ||
+            s.status !== (action === "pause" ? "active" : "paused")
+          )
+            return conflict();
+          run(
+            "UPDATE schedules SET status=?,updated_at=? WHERE id=?",
+            action === "pause" ? "paused" : "active",
+            now(),
+            req.params.id,
+          );
+          return { ok: true };
+        }),
+    );
+  hub.delete<{ Params: { id: string } }>("/api/schedules/:id", async (req) =>
+    tx(() => {
+      const s = get("SELECT * FROM schedules WHERE id=?", req.params.id);
+      if (!s) return missing();
+      if (
+        s.owner_kind !== "user" ||
+        !["active", "paused"].includes(String(s.status))
+      )
+        return conflict();
+      run(
+        "UPDATE schedules SET status='cancelled',updated_at=? WHERE id=?",
+        now(),
+        req.params.id,
+      );
+      return { ok: true };
+    }),
+  );
+  hub.post<{ Params: { id: string } }>(
+    "/api/work-items/:id/cancel",
+    async (req) =>
+      tx(() => {
+        const w = get("SELECT * FROM work_items WHERE id=?", req.params.id);
+        if (!w) return missing();
+        if (["completed", "failed", "cancelled"].includes(String(w.status)))
+          return conflict();
+        const time = now();
+        run(
+          "UPDATE work_items SET status='cancelled',updated_at=? WHERE id=?",
+          time,
+          req.params.id,
+        );
+        run(
+          "UPDATE schedules SET status='cancelled',updated_at=? WHERE owner_kind='work_item' AND owner_id=? AND status IN ('active','paused')",
+          time,
+          req.params.id,
+        );
+        run(
+          "UPDATE executions SET status='cancelled',finished_at=?,lease_token=NULL WHERE work_item_id=? AND status IN ('queued','running','claimed','retry_wait')",
+          time,
+          req.params.id,
+        );
+        run(
+          "UPDATE interactions SET status='cancelled' WHERE work_item_id=? AND status='open'",
+          req.params.id,
+        );
+        return { ok: true };
+      }),
+  );
+  const tickScheduler = (): number => {
+    let count = 0;
+    for (;;) {
+      const fired = tx(() => {
+        const time = now();
+        const schedule = get(
+          "SELECT * FROM schedules WHERE status='active' AND next_fire_at<=? ORDER BY next_fire_at,id LIMIT 1",
+          time,
+        );
+        if (!schedule) return false;
+        const scheduledFor = String(schedule.next_fire_at);
+        const firingId = randomUUID();
+        run(
+          "INSERT INTO schedule_firings(id,schedule_id,scheduled_for,created_at) VALUES(?,?,?,?)",
+          firingId,
+          String(schedule.id),
+          scheduledFor,
+          time,
+        );
+        if (schedule.owner_kind === "user") {
+          const created = createEvent({
+            source: schedule.source,
+            type: schedule.event_type,
+            payload: JSON.parse(String(schedule.payload)),
+          });
+          run(
+            "UPDATE schedule_firings SET event_id=? WHERE id=?",
+            String(created.event?.id),
+            firingId,
+          );
+        } else {
+          const parent = get(
+            "SELECT * FROM executions WHERE id=?",
+            String(schedule.parent_execution_id),
+          );
+          const work = get(
+            "SELECT * FROM work_items WHERE id=?",
+            String(schedule.owner_id),
+          );
+          if (parent && work && work.status === "waiting_schedule") {
+            const executionId = randomUUID();
+            const retry = schedule.reason === "retry";
+            run(
+              "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,agent_session_id,not_before,input,created_at,trigger_kind,parent_execution_id,retry_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+              executionId,
+              String(work.id),
+              Number(parent.sequence) + 1,
+              "queued",
+              String(parent.agent_profile_id),
+              parent.agent_session_id as SQLInputValue,
+              time,
+              json({}),
+              time,
+              retry ? "retry" : "scheduled_resume",
+              String(parent.id),
+              retry ? Number(parent.retry_attempt) + 1 : 0,
+            );
+            run(
+              "UPDATE schedule_firings SET execution_id=? WHERE id=?",
+              executionId,
+              firingId,
+            );
+            run(
+              "UPDATE work_items SET status='active',updated_at=? WHERE id=?",
+              time,
+              String(work.id),
+            );
+          }
+        }
+        const next =
+          schedule.kind === "cron"
+            ? nextCron(
+                String(schedule.expression),
+                String(schedule.timezone),
+                clockNow(),
+              )
+            : null;
+        run(
+          "UPDATE schedules SET status=?,last_fire_at=?,next_fire_at=?,updated_at=? WHERE id=?",
+          next ? "active" : "completed",
+          scheduledFor,
+          next,
+          time,
+          String(schedule.id),
+        );
+        return true;
+      });
+      if (!fired) break;
+      count++;
+    }
+    return count;
+  };
+  Object.assign(hub, { tickScheduler });
+  let timer: ReturnType<typeof setInterval> | undefined;
+  hub.addHook("onReady", async () => {
+    if (pollIntervalMs > 0) {
+      timer = setInterval(() => {
+        try {
+          tickScheduler();
+        } catch {
+          hub.log.error("scheduler tick failed");
+        }
+      }, pollIntervalMs);
+      timer.unref();
+      try {
+        tickScheduler();
+      } catch {
+        hub.log.error("scheduler tick failed");
+      }
+    }
+  });
+  hub.addHook("onClose", async () => {
+    if (timer) clearInterval(timer);
+  });
+  const createEvent = (b: Row) => {
     const route = config.routes.find(
       (r) => r.event.source === b.source && r.event.type === b.type,
     );
     if (!route) return missing();
     const profile = config.agents[route.agent];
-    return tx(() => {
-      const time = now(),
-        eventId = randomUUID(),
-        workId = randomUUID(),
-        executionId = randomUUID();
-      run(
-        "INSERT INTO events VALUES(?,?,?,?,?)",
+    const time = now(),
+      eventId = randomUUID(),
+      workId = randomUUID(),
+      executionId = randomUUID();
+    run(
+      "INSERT INTO events VALUES(?,?,?,?,?)",
+      eventId,
+      b.source as string,
+      b.type as string,
+      json(b.payload),
+      time,
+    );
+    run(
+      "INSERT INTO agent_profiles VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,adapter=excluded.adapter,model=excluded.model,reasoning=excluded.reasoning,config=excluded.config",
+      route.agent,
+      route.agent,
+      profile.adapter,
+      profile.model ?? null,
+      profile.reasoning ?? null,
+      json({
+        ...(profile.config ?? {}),
+        isolation: profile.isolation ?? "trusted-local",
+        ...(profile.workspaceRoot
+          ? { workspaceRoot: profile.workspaceRoot }
+          : {}),
+      }),
+    );
+    run(
+      "INSERT INTO work_items VALUES(?,?,?,?,?,?,?,?,?)",
+      workId,
+      route.title,
+      "active",
+      route.id,
+      route.agent,
+      time,
+      time,
+      null,
+      json({
         eventId,
-        b.source as string,
-        b.type as string,
-        json(b.payload),
-        time,
-      );
-      run(
-        "INSERT INTO agent_profiles VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,adapter=excluded.adapter,model=excluded.model,reasoning=excluded.reasoning,config=excluded.config",
-        route.agent,
-        route.agent,
-        profile.adapter,
-        profile.model ?? null,
-        profile.reasoning ?? null,
-        json({
-          ...(profile.config ?? {}),
-          isolation: profile.isolation ?? "trusted-local",
-          ...(profile.workspaceRoot
-            ? { workspaceRoot: profile.workspaceRoot }
-            : {}),
-        }),
-      );
-      run(
-        "INSERT INTO work_items VALUES(?,?,?,?,?,?,?,?,?)",
-        workId,
-        route.title,
-        "active",
-        route.id,
-        route.agent,
-        time,
-        time,
-        null,
-        json({ eventId, instruction: route.instruction ?? "" }),
-      );
-      run(
-        "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,not_before,input,created_at) VALUES(?,?,?,?,?,?,?,?)",
-        executionId,
-        workId,
-        1,
-        "queued",
-        route.agent,
-        time,
-        json(b.payload),
-        time,
-      );
-      return {
-        event: shape(get("SELECT * FROM events WHERE id=?", eventId)),
-        workItem: shape(get("SELECT * FROM work_items WHERE id=?", workId)),
-        execution: shape(
-          get("SELECT * FROM executions WHERE id=?", executionId),
-        ),
-      };
-    });
+        instruction: route.instruction ?? "",
+        retryPolicy: route.retryPolicy ?? null,
+      }),
+    );
+    run(
+      "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,not_before,input,created_at) VALUES(?,?,?,?,?,?,?,?)",
+      executionId,
+      workId,
+      1,
+      "queued",
+      route.agent,
+      time,
+      json(b.payload),
+      time,
+    );
+    return {
+      event: shape(get("SELECT * FROM events WHERE id=?", eventId)),
+      workItem: shape(get("SELECT * FROM work_items WHERE id=?", workId)),
+      execution: shape(get("SELECT * FROM executions WHERE id=?", executionId)),
+    };
+  };
+  hub.post("/api/events", async (req) => {
+    const b = req.body;
+    if (!object(b) || !str(b.source) || !str(b.type) || !object(b.payload))
+      return bad("事件格式不正确");
+    return tx(() => createEvent(b));
   });
   hub.get("/api/work-items", async () =>
     all("SELECT id FROM work_items ORDER BY created_at DESC LIMIT 50").map(
@@ -213,7 +506,7 @@ export function createHub(
           String(q.id),
         );
         run(
-          "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,agent_session_id,not_before,input,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,agent_session_id,not_before,input,created_at,trigger_kind,parent_execution_id,retry_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
           randomUUID(),
           String(q.work_item_id),
           Number(e.sequence) + 1,
@@ -223,6 +516,9 @@ export function createHub(
           time,
           json({ answer: b.answer, interactionId: q.id }),
           time,
+          "human_answer",
+          String(e.id),
+          0,
         );
         run(
           "UPDATE work_items SET status='active',updated_at=? WHERE id=?",
@@ -327,7 +623,11 @@ export function createHub(
       )
         return bad("结果格式不正确");
       const result = b.result;
-      if (!["completed", "needs_input", "failed"].includes(String(result.type)))
+      if (
+        !["completed", "needs_input", "failed", "later"].includes(
+          String(result.type),
+        )
+      )
         return bad("结果类型不正确");
       if (
         result.type === "needs_input" &&
@@ -346,6 +646,19 @@ export function createHub(
         (!str(result.sessionId) || typeof result.output !== "string")
       )
         return bad("完成结果不正确");
+      if (
+        result.type === "later" &&
+        (!str(result.sessionId) ||
+          !str(result.message) ||
+          (result.afterSeconds !== undefined) ===
+            (result.runAt !== undefined) ||
+          (result.afterSeconds !== undefined &&
+            (!Number.isInteger(result.afterSeconds) ||
+              Number(result.afterSeconds) < 1 ||
+              Number(result.afterSeconds) > 31536000)) ||
+          (result.runAt !== undefined && !validInstant(result.runAt)))
+      )
+        return bad("稍后执行时间不正确");
       if (
         result.type === "failed" &&
         typeof result.error !== "string" &&
@@ -387,7 +700,34 @@ export function createHub(
             "{}",
           );
         }
-        if (result.type === "needs_input") {
+        if (result.type === "later") {
+          const due =
+            result.runAt !== undefined
+              ? new Date(String(result.runAt)).toISOString()
+              : new Date(
+                  clockNow() + Number(result.afterSeconds) * 1000,
+                ).toISOString();
+          if (due <= time) return bad("稍后执行时间必须在未来");
+          run(
+            "UPDATE executions SET status='completed',agent_session_id=?,output=?,finished_at=?,lease_token=NULL WHERE id=?",
+            sid,
+            json(result.message),
+            time,
+            String(e.id),
+          );
+          scheduleWork(
+            String(e.work_item_id),
+            String(e.id),
+            "later",
+            due,
+            time,
+          );
+          run(
+            "UPDATE work_items SET status='waiting_schedule',updated_at=? WHERE id=?",
+            time,
+            String(e.work_item_id),
+          );
+        } else if (result.type === "needs_input") {
           const q = result.request as Row;
           run(
             "INSERT INTO interactions VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -424,20 +764,78 @@ export function createHub(
             time,
             String(e.id),
           );
-          run(
-            "UPDATE work_items SET status=?,updated_at=?,completed_at=? WHERE id=?",
-            status,
-            time,
-            status === "completed" ? time : null,
+          const work = get(
+            "SELECT * FROM work_items WHERE id=?",
             String(e.work_item_id),
           );
+          const meta = work ? (JSON.parse(String(work.metadata)) as Row) : {};
+          const policy = meta.retryPolicy;
+          const err = object(result.error) ? result.error : null;
+          const retryable =
+            status === "failed" &&
+            err?.retryable === true &&
+            [
+              "agent_execution",
+              "agent_unavailable",
+              "agent_reported_failure",
+            ].includes(String(err.code));
+          const attempt = Number(e.retry_attempt);
+          if (
+            retryable &&
+            validPolicy(policy) &&
+            attempt + 1 < policy.maxAttempts
+          ) {
+            const due = new Date(
+              clockNow() + retryDelay(policy, attempt + 1) * 1000,
+            ).toISOString();
+            scheduleWork(
+              String(e.work_item_id),
+              String(e.id),
+              "retry",
+              due,
+              time,
+            );
+            run(
+              "UPDATE work_items SET status='waiting_schedule',updated_at=? WHERE id=?",
+              time,
+              String(e.work_item_id),
+            );
+          } else
+            run(
+              "UPDATE work_items SET status=?,updated_at=?,completed_at=? WHERE id=?",
+              status,
+              time,
+              status === "completed" ? time : null,
+              String(e.work_item_id),
+            );
         }
         return { ok: true };
       });
     },
   );
+  tx(() => {
+    for (const entry of config.schedules ?? []) {
+      if (!get("SELECT id FROM schedules WHERE config_key=?", entry.id)) {
+        const schedule = parseUserSchedule({
+          kind: "cron",
+          expression: entry.cron,
+          timezone: entry.timezone ?? "UTC",
+          event: {
+            source: entry.event.source,
+            type: entry.event.type,
+            payload: entry.event.payload ?? {},
+          },
+        });
+        run(
+          "UPDATE schedules SET config_key=? WHERE id=?",
+          entry.id,
+          String(schedule?.id),
+        );
+      }
+    }
+  });
   hub.addHook("onClose", async () => {
     db.close();
   });
-  return hub;
+  return hub as typeof hub & { tickScheduler: () => number };
 }

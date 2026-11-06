@@ -33,7 +33,17 @@ async function main(): Promise<void> {
     const config = existsSync(configPath)
       ? loadConfig(configPath)
       : defaultConfig;
-    const hub = createHub(join(home, "taskcircuit.db"), config);
+    const interval = Number(
+      process.env.TASKCIRCUIT_SCHEDULER_INTERVAL_MS ?? 1000,
+    );
+    if (!Number.isInteger(interval) || interval < 10)
+      throw new Error("调度间隔不正确");
+    const hub = createHub(
+      join(home, "taskcircuit.db"),
+      config,
+      undefined,
+      interval,
+    );
     await hub.listen({ port: 4317, host: "127.0.0.1" });
     console.log(
       JSON.stringify({
@@ -103,12 +113,66 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (command === "schedule") {
+    const action = args.shift();
+    if (action === "list") {
+      print(await api("/api/schedules"));
+      return;
+    }
+    if (action === "add") {
+      const options: Record<string, string> = {};
+      for (let i = 0; i < args.length; i += 2) {
+        if (!args[i]?.startsWith("--") || !args[i + 1])
+          throw new Error("计划参数不正确");
+        options[args[i].slice(2)] = args[i + 1];
+      }
+      const event = {
+        source: options.source ?? "local",
+        type: options.event,
+        payload: {},
+      };
+      if (!event.type || !!options.cron === !!options.at)
+        throw new Error("请指定 --event 和 --cron 或 --at");
+      print(
+        await api(
+          "/api/schedules",
+          "POST",
+          options.cron
+            ? {
+                kind: "cron",
+                expression: options.cron,
+                timezone: options.timezone ?? "UTC",
+                event,
+              }
+            : { kind: "once", runAt: options.at, event },
+        ),
+      );
+      return;
+    }
+    const id = args[0];
+    if (!id) throw new Error("请指定计划 ID");
+    if (action === "cancel") {
+      print(await api(`/api/schedules/${encodeURIComponent(id)}`, "DELETE"));
+      return;
+    }
+    if (action === "pause" || action === "resume") {
+      print(
+        await api(
+          `/api/schedules/${encodeURIComponent(id)}/${action}`,
+          "POST",
+          {},
+        ),
+      );
+      return;
+    }
+    throw new Error("计划命令不正确");
+  }
   if (command === "status") {
     print(await api("/api/work-items"));
     return;
   }
   console.log(
-    "用法: taskcircuit hub | worker [--once] | emit <事件类型> | work <工作ID> | answer <问题ID> <回答> | status",
+    "用法: taskcircuit hub | worker [--once] | emit <事件类型> | work <工作ID> | answer <问题ID> <回答> | status | schedule list/add/pause/resume/cancel",
   );
 }
 main().catch((e) => {

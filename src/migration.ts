@@ -10,6 +10,14 @@ CREATE INDEX execution_queue ON executions(status,not_before,lease_expires_at);
 CREATE INDEX work_execution ON executions(work_item_id,sequence);
 CREATE INDEX work_interaction ON interactions(work_item_id,created_at);
 `;
+const second = `
+ALTER TABLE executions ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'initial';
+ALTER TABLE executions ADD COLUMN parent_execution_id TEXT REFERENCES executions(id);
+ALTER TABLE executions ADD COLUMN retry_attempt INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE schedules(id TEXT PRIMARY KEY,config_key TEXT UNIQUE,kind TEXT NOT NULL,status TEXT NOT NULL,owner_kind TEXT NOT NULL,owner_id TEXT,reason TEXT NOT NULL,parent_execution_id TEXT REFERENCES executions(id),source TEXT,event_type TEXT,payload TEXT,expression TEXT,timezone TEXT,run_at TEXT,next_fire_at TEXT,last_fire_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE INDEX schedules_due ON schedules(status,next_fire_at);
+CREATE TABLE schedule_firings(id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL REFERENCES schedules(id),scheduled_for TEXT NOT NULL,event_id TEXT REFERENCES events(id),execution_id TEXT REFERENCES executions(id),created_at TEXT NOT NULL,UNIQUE(schedule_id,scheduled_for));
+`;
 export function migrate(db: DatabaseSync): void {
   db.exec(
     "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -22,6 +30,14 @@ export function migrate(db: DatabaseSync): void {
     if (!applied) {
       db.exec(first);
       db.prepare("INSERT INTO schema_migrations VALUES(1,?)").run(
+        new Date().toISOString(),
+      );
+    }
+    if (
+      !db.prepare("SELECT version FROM schema_migrations WHERE version=2").get()
+    ) {
+      db.exec(second);
+      db.prepare("INSERT INTO schema_migrations VALUES(2,?)").run(
         new Date().toISOString(),
       );
     }

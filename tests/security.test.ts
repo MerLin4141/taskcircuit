@@ -123,6 +123,7 @@ describe("trusted local security contract", () => {
           "instruction",
           "model",
           "previousAnswers",
+          "retryAttempt",
           "workItemId",
           "workingDirectory",
         ].sort(),

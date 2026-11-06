@@ -41,6 +41,15 @@ export class ClaudeAdapter implements AgentAdapter {
     )
       throw new AgentProtocolError();
     const parsed = parseResponse(value.result);
+    if (parsed.kind === "later")
+      return {
+        type: "later",
+        sessionId: value.session_id as string,
+        message: parsed.message,
+        ...(parsed.afterSeconds !== undefined
+          ? { afterSeconds: parsed.afterSeconds }
+          : { runAt: parsed.runAt }),
+      };
     if (parsed.kind === "ask")
       return {
         type: "needs_input",
@@ -55,7 +64,12 @@ export class ClaudeAdapter implements AgentAdapter {
       };
     return {
       type: "failed",
-      error: { code: "agent_reported_failure", message: parsed.message },
+      sessionId: value.session_id as string,
+      error: {
+        code: "agent_reported_failure",
+        message: parsed.message,
+        retryable: parsed.retryable ?? false,
+      },
     };
   }
 }

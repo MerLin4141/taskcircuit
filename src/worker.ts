@@ -121,13 +121,18 @@ export async function workOnce(
           answer: i.response,
         })),
         model: agentProfile.model,
+        retryAttempt: execution.retryAttempt,
       });
     } catch (error) {
       result = {
         type: "failed",
         error:
           error instanceof AgentError
-            ? { code: error.code, message: error.message }
+            ? {
+                code: error.code,
+                message: error.message,
+                retryable: error.retryable,
+              }
             : { code: "agent_execution", message: "Agent 执行失败" },
       };
     }

@@ -2,6 +2,7 @@ export class AgentError extends Error {
   constructor(
     public readonly code: string,
     message: string,
+    public readonly retryable = false,
   ) {
     super(message);
     this.name = this.constructor.name;
@@ -9,7 +10,7 @@ export class AgentError extends Error {
 }
 export class AgentUnavailableError extends AgentError {
   constructor() {
-    super("agent_unavailable", "Agent CLI 不可用");
+    super("agent_unavailable", "Agent CLI 不可用", true);
   }
 }
 export class AgentAuthenticationError extends AgentError {
@@ -24,7 +25,7 @@ export class AgentProtocolError extends AgentError {
 }
 export class AgentExecutionError extends AgentError {
   constructor(message = "Agent 执行失败") {
-    super("agent_execution", message);
+    super("agent_execution", message, true);
   }
 }
 export class AgentResumeError extends AgentError {

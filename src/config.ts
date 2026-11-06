@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { validPolicy, type RetryPolicy } from "./scheduling.js";
 import { isAbsolute } from "node:path";
 export interface AgentProfile {
   adapter: "mock" | "codex" | "claude";
@@ -14,10 +15,18 @@ export interface Route {
   agent: string;
   title: string;
   instruction?: string;
+  retryPolicy?: RetryPolicy;
+}
+export interface ConfigSchedule {
+  id: string;
+  cron: string;
+  timezone?: string;
+  event: { source: string; type: string; payload?: Record<string, unknown> };
 }
 export interface Config {
   agents: Record<string, AgentProfile>;
   routes: Route[];
+  schedules?: ConfigSchedule[];
 }
 export const defaultConfig: Config = {
   agents: {
@@ -37,6 +46,25 @@ export const defaultConfig: Config = {
       agent: "demo-agent",
       title: "颜色试跑",
     },
+    ...["later", "retry", "retry.exhaust", "cron"].map((kind) => ({
+      id: `mock-${kind}`,
+      event: { source: "local", type: `demo.${kind}` },
+      agent: "mock-demo",
+      title: `试跑 ${kind}`,
+      retryPolicy: {
+        maxAttempts: 3,
+        strategy: "fixed" as const,
+        initialDelaySeconds: 2,
+        maxDelaySeconds: 2,
+      },
+    })),
+    ...(["codex", "claude"] as const).map((adapter) => ({
+      id: `${adapter}-later`,
+      event: { source: "local", type: `demo.${adapter}.later` },
+      agent: `${adapter}-demo`,
+      title: "Later 试跑",
+      instruction: `第一次请返回 later，afterSeconds 必须为 2，message 为稍后继续。恢复后返回 complete，message 必须精确为「TaskCircuit ${adapter === "codex" ? "Codex" : "Claude"} Later 试跑通过」，不含界定符和标点。`,
+    })),
     ...(["mock", "codex", "claude"] as const).map((adapter) => ({
       id: `demo-${adapter}`,
       event: { source: "local", type: `demo.${adapter}.color` },
@@ -80,6 +108,7 @@ export function loadConfig(path: string): Config {
       typeof route.id !== "string" ||
       !route.id ||
       typeof route.title !== "string" ||
+      (route.retryPolicy !== undefined && !validPolicy(route.retryPolicy)) ||
       (route.instruction !== undefined &&
         typeof route.instruction !== "string") ||
       !route.event ||
@@ -93,6 +122,29 @@ export function loadConfig(path: string): Config {
       throw new Error("路由 ID 或事件匹配重复");
     ids.add(route.id);
     matches.add(match);
+  }
+  if (config.schedules !== undefined) {
+    if (!Array.isArray(config.schedules)) throw new Error("计划配置无效");
+    const scheduleIds = new Set<string>();
+    for (const schedule of config.schedules) {
+      if (
+        !schedule ||
+        typeof schedule.id !== "string" ||
+        !schedule.id ||
+        scheduleIds.has(schedule.id) ||
+        typeof schedule.cron !== "string" ||
+        !schedule.event ||
+        typeof schedule.event.source !== "string" ||
+        typeof schedule.event.type !== "string" ||
+        !config.routes.some(
+          (r) =>
+            r.event.source === schedule.event.source &&
+            r.event.type === schedule.event.type,
+        )
+      )
+        throw new Error("计划配置无效");
+      scheduleIds.add(schedule.id);
+    }
   }
   return config;
 }

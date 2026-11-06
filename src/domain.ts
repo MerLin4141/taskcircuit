@@ -23,6 +23,8 @@ export interface Execution {
   agentProfileId: string;
   agentSessionId: string | null;
   input: Record<string, unknown>;
+  triggerKind: "initial" | "human_answer" | "retry" | "scheduled_resume";
+  retryAttempt: number;
 }
 export interface AgentSession {
   id: string;
@@ -39,7 +41,18 @@ export interface Question {
 export type AgentResult =
   | { type: "needs_input"; sessionId: string; request: Question }
   | { type: "completed"; sessionId: string; output: string }
-  | { type: "failed"; error: string | { code: string; message: string } };
+  | {
+      type: "later";
+      sessionId: string;
+      message: string;
+      afterSeconds?: number;
+      runAt?: string;
+    }
+  | {
+      type: "failed";
+      sessionId?: string;
+      error: string | { code: string; message: string; retryable?: boolean };
+    };
 export class TaskCircuitError extends Error {
   constructor(
     public code: string,

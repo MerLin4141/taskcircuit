@@ -16,9 +16,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:e2e:codex": "npm run build && node scripts/e2e.mjs codex",
-    "test:e2e:claude": "npm run build && node scripts/e2e.mjs claude"
+    "test:e2e:claude": "npm run build && node scripts/e2e.mjs claude",
+    "test:e2e:codex-later": "npm run build && node scripts/e2e-later.mjs codex",
+    "test:e2e:claude-later": "npm run build && node scripts/e2e-later.mjs claude",
+    "pretest": "npm run build"
   },
   "dependencies": {
+    "cron-parser": "^5.10.4",
     "fastify": "^5.6.0",
     "zod": "^4.6.7"
   },

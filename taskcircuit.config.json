@@ -58,6 +58,86 @@
       "agent": "claude-demo",
       "title": "颜色试跑",
       "instruction": "第一次请提问：请选择一个颜色，选项为蓝色和绿色。回答为蓝色时，完成结果的 message 必须精确等于「你选了蓝色，TaskCircuit 试跑通过」；回答为绿色时，message 必须精确等于「你选了绿色，TaskCircuit 试跑通过」。方括号是界定符，不是结果的一部分，结果末尾不加标点。"
+    },
+    {
+      "id": "mock-later",
+      "event": {
+        "source": "local",
+        "type": "demo.later"
+      },
+      "agent": "mock-demo",
+      "title": "试跑 later",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "strategy": "fixed",
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 2
+      }
+    },
+    {
+      "id": "mock-retry",
+      "event": {
+        "source": "local",
+        "type": "demo.retry"
+      },
+      "agent": "mock-demo",
+      "title": "试跑 retry",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "strategy": "fixed",
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 2
+      }
+    },
+    {
+      "id": "mock-retry.exhaust",
+      "event": {
+        "source": "local",
+        "type": "demo.retry.exhaust"
+      },
+      "agent": "mock-demo",
+      "title": "试跑 retry.exhaust",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "strategy": "fixed",
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 2
+      }
+    },
+    {
+      "id": "mock-cron",
+      "event": {
+        "source": "local",
+        "type": "demo.cron"
+      },
+      "agent": "mock-demo",
+      "title": "试跑 cron",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "strategy": "fixed",
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 2
+      }
+    },
+    {
+      "id": "codex-later",
+      "event": {
+        "source": "local",
+        "type": "demo.codex.later"
+      },
+      "agent": "codex-demo",
+      "title": "Later 试跑",
+      "instruction": "第一次请返回 later，afterSeconds 必须为 2，message 为稍后继续。恢复后返回 complete，message 必须精确为「TaskCircuit Codex Later 试跑通过」，不含界定符和标点。"
+    },
+    {
+      "id": "claude-later",
+      "event": {
+        "source": "local",
+        "type": "demo.claude.later"
+      },
+      "agent": "claude-demo",
+      "title": "Later 试跑",
+      "instruction": "第一次请返回 later，afterSeconds 必须为 2，message 为稍后继续。恢复后返回 complete，message 必须精确为「TaskCircuit Claude Later 试跑通过」，不含界定符和标点。"
     }
   ]
 }
