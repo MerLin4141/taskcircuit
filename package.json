@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "A durable local runtime for autonomous CLI agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MerLin4141/taskcircuit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MerLin4141/taskcircuit/issues"
+  },
+  "homepage": "https://github.com/MerLin4141/taskcircuit#readme",
   "engines": {
     "node": ">=24"
   },
@@ -32,7 +42,5 @@
     "prettier": "^3.9.10",
     "typescript": "^5.9.0",
     "vitest": "^5.1.0"
-  },
-  "description": "A durable local runtime for autonomous CLI agents.",
-  "license": "MIT"
+  }
 }
