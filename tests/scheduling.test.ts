@@ -118,6 +118,60 @@ describe("durable schedules", () => {
       await hub.close();
     }
   });
+  it.each([
+    ["quota_exceeded", false],
+    ["auth_failed", false],
+    ["agent_unavailable", false],
+    ["agent_protocol", false],
+    ["rate_limited", true],
+    ["agent_timeout", true],
+  ])("routes %s retry eligibility safely", async (code, shouldRetry) => {
+    const hub = createHub(":memory:", defaultConfig);
+    try {
+      const w = (await create(hub)).json().workItem;
+      const c = (await claim(hub)).json();
+      await result(hub, c, {
+        type: "failed",
+        error: { code, message: "safe", retryable: true },
+      });
+      const d = await detail(hub, w.id);
+      expect(d.workItem.status).toBe(
+        shouldRetry ? "waiting_schedule" : "failed",
+      );
+      if (code === "quota_exceeded") {
+        const notes = (await hub.inject("/api/notifications")).json();
+        expect(notes[0].body).toContain("quota");
+      }
+      expect(
+        d.schedules.filter((entry: any) => entry.status === "active"),
+      ).toHaveLength(shouldRetry ? 1 : 0);
+    } finally {
+      await hub.close();
+    }
+  });
+  it("reads legacy agent_execution errors after reopening the database", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tc-legacy-error-"));
+    const path = join(dir, "db");
+    let hub = createHub(path, defaultConfig);
+    try {
+      const item = (await create(hub, "demo.color")).json().workItem;
+      const c = (await claim(hub)).json();
+      await result(hub, c, {
+        type: "failed",
+        error: { code: "agent_execution", message: "legacy", retryable: true },
+      });
+      await hub.close();
+      hub = createHub(path, defaultConfig);
+      expect((await detail(hub, item.id)).executions[0].error).toEqual({
+        code: "agent_execution",
+        message: "legacy",
+        retryable: true,
+      });
+    } finally {
+      await hub.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("does not retry a non-retryable failure", async () => {
     const hub = createHub(":memory:", defaultConfig);
     try {

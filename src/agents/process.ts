@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process";
-import { AgentExecutionError, AgentUnavailableError } from "./errors.js";
+import {
+  AgentExecutionError,
+  AgentTimeoutError,
+  AgentUnavailableError,
+} from "./errors.js";
 export interface ProcessSpec {
   executable: string;
   args: string[];
@@ -74,7 +78,8 @@ export class ProcessRunner implements Runner {
       child.on("close", (exitCode) => {
         clearTimeout(timer);
         spec.signal?.removeEventListener("abort", abort);
-        if (reason) reject(new AgentExecutionError(reason));
+        if (reason === "Agent 执行超时") reject(new AgentTimeoutError());
+        else if (reason) reject(new AgentExecutionError(reason));
         else resolve({ exitCode, stdout, stderr });
       });
       child.stdin.on("error", () => {});

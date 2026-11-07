@@ -89,6 +89,7 @@ export function createHub(
     kind: "interaction_required" | "work_item_failed" | "work_item_completed",
     title: string,
     time: string,
+    errorCode?: string,
   ) => {
     const work = get("SELECT metadata FROM work_items WHERE id=?", workId);
     if (!work) return;
@@ -105,11 +106,22 @@ export function createHub(
         : kind === "work_item_failed"
           ? "error"
           : "info";
+    const errorLabels: Record<string, string> = {
+      quota_exceeded: "Agent failed: quota exceeded",
+      rate_limited: "Agent failed: rate limited",
+      auth_failed: "Agent failed: authentication required",
+      agent_unavailable: "Agent failed: CLI unavailable",
+      agent_timeout: "Agent failed: timed out",
+      agent_protocol: "Agent failed: invalid response",
+    };
     const body =
       kind === "interaction_required"
         ? "有问题需要回答"
         : kind === "work_item_failed"
-          ? "工作执行失败"
+          ? (errorCode &&
+              Object.hasOwn(errorLabels, errorCode) &&
+              errorLabels[errorCode]) ||
+            "工作执行失败"
           : "工作已完成";
     run(
       "INSERT INTO notifications VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -1173,7 +1185,8 @@ export function createHub(
             err?.retryable === true &&
             [
               "agent_execution",
-              "agent_unavailable",
+              "rate_limited",
+              "agent_timeout",
               "agent_reported_failure",
             ].includes(String(err.code));
           const attempt = Number(e.retry_attempt);
@@ -1211,6 +1224,7 @@ export function createHub(
               status === "failed" ? "work_item_failed" : "work_item_completed",
               String(work?.title ?? "工作"),
               time,
+              status === "failed" ? String(err?.code ?? "") : undefined,
             );
           }
         }

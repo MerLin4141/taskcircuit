@@ -156,6 +156,8 @@ V0.1 使用 **Trusted Local（本地可信执行边界）**：Codex 和 Claude C
 
 Control Plane（控制面）包括 CLI、Hub、Scheduler、通知分发器和 SQLite。Worker 从 Hub 获取工作并调用 Agent Adapter。详见[架构与信任边界](docs/architecture.md)。
 
+`status`、`work <id>`、`inbox`、`runtime status` 和 `doctor` 默认以人类可读形式显示；加 `--json` 可获取机器可读输出，Work Item 和 Interaction ID 保持完整。外部会话 ID 仍然隐藏。Agent 错误可区分额度、限流、认证、CLI 不可用、超时、协议及其他失败；详见 [Agent 适配器](docs/agents.md)。
+
 ## 开发
 
 ```powershell

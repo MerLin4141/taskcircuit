@@ -15,8 +15,21 @@ import {
 } from "./platform/windows/runtime.js";
 import { resolveCli, detectCli } from "./agents/capability.js";
 import { ProcessRunner } from "./agents/process.js";
+import {
+  formatWorkItemList,
+  formatWorkItem,
+  formatInbox,
+  formatRuntimeStatus,
+  formatDoctor,
+} from "./cli-format.js";
 const args = process.argv.slice(2);
 const command = args.shift();
+const jsonMode =
+  (command === "runtime"
+    ? args[0] === "status"
+    : ["status", "work", "inbox", "doctor"].includes(command ?? "")) &&
+  args.includes("--json");
+if (jsonMode) args.splice(args.indexOf("--json"), 1);
 const port = Number(process.env.TASKCIRCUIT_PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("端口不正确");
@@ -216,13 +229,15 @@ async function main(): Promise<void> {
         health = await api("/api/health");
         workers = await api("/api/workers");
       } catch {}
-      print({
+      const result = {
         windowsStartupTask: startup,
         runtime: state,
         hub: health,
         workers,
         home,
-      });
+      };
+      if (jsonMode) print(result);
+      else console.log(formatRuntimeStatus(result));
       return;
     }
     if (action === "stop") {
@@ -284,15 +299,18 @@ async function main(): Promise<void> {
     const report: Record<string, unknown> = {
       node: { status: "PASS", version: process.version },
       home: { status: existsSync(home) ? "PASS" : "WARN", path: home },
-      sqlite: { status: "WARN", message: "尚未检查" },
+      sqlite: { status: "WARN", message: "Not checked" },
       codex: { status: "WARN" },
       claude: { status: "WARN" },
     };
     try {
       await import("node:sqlite");
-      report.sqlite = { status: "PASS", message: "Node 内置 SQLite 可加载" };
+      report.sqlite = { status: "PASS", message: "Built-in SQLite available" };
     } catch {
-      report.sqlite = { status: "FAIL", message: "无法加载 Node SQLite" };
+      report.sqlite = {
+        status: "FAIL",
+        message: "Built-in SQLite unavailable",
+      };
     }
     try {
       report.hub = { status: "PASS", detail: await api("/api/health") };
@@ -302,8 +320,8 @@ async function main(): Promise<void> {
         detail: entries,
       };
     } catch {
-      report.hub = { status: "WARN", message: "Hub 未连接" };
-      report.workers = { status: "WARN", message: "无法获取 Worker 状态" };
+      report.hub = { status: "WARN", message: "Hub unavailable" };
+      report.workers = { status: "WARN", message: "Worker status unavailable" };
     }
     if (process.platform === "win32") {
       try {
@@ -329,16 +347,22 @@ async function main(): Promise<void> {
         );
         report[kind] = {
           status: supported ? "PASS" : "WARN",
-          message:
-            kind === "codex"
-              ? "CLI 已安装；Windows sandbox 未主动验证"
-              : "CLI 已安装",
+          message: supported
+            ? "CLI detected; authentication not verified"
+            : "CLI detected but required options were not confirmed",
         };
       } catch {
-        report[kind] = { status: "WARN", message: "CLI 不可用" };
+        report[kind] = { status: "WARN", message: "CLI unavailable" };
       }
     }
-    print(report);
+    if (jsonMode) print(report);
+    else console.log(formatDoctor(report));
+    if (
+      Object.values(report).some(
+        (v) => (v as { status?: string }).status === "FAIL",
+      )
+    )
+      process.exitCode = 1;
     return;
   }
   if (command === "emit" && args[0]) {
@@ -357,7 +381,8 @@ async function main(): Promise<void> {
     )) as { agentSession?: { externalSessionId?: string } };
     if (detail.agentSession?.externalSessionId)
       detail.agentSession.externalSessionId = "present";
-    print(detail);
+    if (jsonMode) print(detail);
+    else console.log(formatWorkItem(detail));
     return;
   }
   if (command === "answer" && args.length >= 2) {
@@ -431,22 +456,9 @@ async function main(): Promise<void> {
     throw new Error("计划命令不正确");
   }
   if (command === "inbox") {
-    const entries = (await api("/api/inbox")) as {
-      interactionId: string;
-      workTitle: string;
-      request: { title: string; options: string[] };
-      createdAt: string;
-    }[];
-    for (const entry of entries) {
-      const age = Math.max(
-        0,
-        Math.floor((Date.now() - Date.parse(entry.createdAt)) / 1000),
-      );
-      console.log(
-        `${entry.interactionId} | ${entry.workTitle} | ${entry.request.title} | ${entry.request.options.join(" / ")} | ${age} 秒前`,
-      );
-    }
-    if (!entries.length) console.log("暂无待回答问题");
+    const entries = await api("/api/inbox");
+    if (jsonMode) print(entries);
+    else console.log(formatInbox(entries));
     return;
   }
   if (command === "watch") {
@@ -503,7 +515,9 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "status") {
-    print(await api("/api/work-items"));
+    const items = await api("/api/work-items");
+    if (jsonMode) print(items);
+    else console.log(formatWorkItemList(items));
     return;
   }
   console.log(

@@ -1,6 +1,6 @@
 import type { AgentAdapter, AgentExecutionInput } from "../../adapter.js";
 import type { AgentResult } from "../../domain.js";
-import { AgentProtocolError, processFailure } from "../errors.js";
+import { AgentProtocolError, classifyAgentFailure } from "../errors.js";
 import { agentEnvironment } from "../environment.js";
 import { parseResponse, prompt } from "../protocol.js";
 import { ProcessRunner, type Runner } from "../process.js";
@@ -28,7 +28,8 @@ export class CodexAdapter implements AgentAdapter {
       stdin: prompt(input),
       timeoutMs: 300000,
     });
-    if (result.exitCode !== 0) throw processFailure(result.stderr, !!previous);
+    if (result.exitCode !== 0)
+      throw classifyAgentFailure("codex", result, !!previous);
     let session: string | undefined;
     let text: string | undefined;
     try {

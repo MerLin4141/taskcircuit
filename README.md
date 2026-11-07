@@ -154,6 +154,8 @@ V0.1 uses **Trusted Local**: Codex and Claude Code are installed and run under t
 
 The Control Plane contains CLI, Hub, Scheduler, notification dispatcher, and SQLite. Worker fetches work from Hub and invokes the Agent Adapter. See [architecture and trust boundaries](docs/architecture.md).
 
+The `status`, `work <id>`, `inbox`, `runtime status`, and `doctor` commands use human-readable output by default. Add `--json` for machine-readable output; Work Item and Interaction IDs remain complete. External session IDs remain redacted. Agent failures distinguish quota, rate limits, authentication, availability, timeouts, protocol errors, and other failures; see [agent adapters](docs/agents.md).
+
 ## Development
 
 ```powershell

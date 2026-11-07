@@ -1,6 +1,6 @@
 import type { AgentAdapter, AgentExecutionInput } from "../../adapter.js";
 import type { AgentResult } from "../../domain.js";
-import { AgentProtocolError, processFailure } from "../errors.js";
+import { AgentProtocolError, classifyAgentFailure } from "../errors.js";
 import { agentEnvironment } from "../environment.js";
 import { parseResponse, prompt } from "../protocol.js";
 import { ProcessRunner, type Runner } from "../process.js";
@@ -24,7 +24,8 @@ export class ClaudeAdapter implements AgentAdapter {
       stdin: prompt(input),
       timeoutMs: 300000,
     });
-    if (result.exitCode !== 0) throw processFailure(result.stderr, !!previous);
+    if (result.exitCode !== 0)
+      throw classifyAgentFailure("claude", result, !!previous);
     let data: unknown;
     try {
       data = JSON.parse(result.stdout);
@@ -33,10 +34,11 @@ export class ClaudeAdapter implements AgentAdapter {
     }
     if (!data || typeof data !== "object") throw new AgentProtocolError();
     const value = data as Record<string, unknown>;
+    if (value.is_error === true)
+      throw classifyAgentFailure("claude", result, !!previous);
     if (
       typeof value.session_id !== "string" ||
       typeof value.result !== "string" ||
-      value.is_error === true ||
       (previous && value.session_id !== previous)
     )
       throw new AgentProtocolError();

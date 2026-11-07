@@ -8,3 +8,5 @@ Hub 仅用于可信本机，JSON API 使用 UTC 时间。
 - `POST /api/interactions/:id/answer`、`GET /api/inbox`、`GET /api/notifications`：人工回答与通知。
 - `GET /api/state`：有限快照和流 head，二者不保证严格原子。`GET /api/stream/head` 与 `GET /api/stream?after=N` 支持变化流重放。
 - `/api/schedules` 及其 pause/resume/delete 接口管理计划。Windows Startup Task 由 CLI 平台层管理，不通过 Hub 创建。
+
+Execution 的 `error` 可包含 `code`、`message` 和 `retryable`；错误类别及重试语义见 [Agent 适配器](agents.md)。旧的 `agent_execution` 记录保持可读，不需要数据库迁移。

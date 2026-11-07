@@ -13,3 +13,9 @@ Codex 使用 `exec --json` 和 `exec resume`；Claude Code 使用 `--print --out
 ProcessRunner 以 argv 直接启动，不使用 shell。`stateRoot` 由 `TASKCIRCUIT_HOME` 或默认 Home 决定；workspaceRoot 由 Profile 的绝对路径、`TASKCIRCUIT_WORKSPACE_ROOT` 或系统临时目录决定。每个工作使用独立子目录，不允许工作目录位于 stateRoot 内。子进程过滤所有 `TASKCIRCUIT_` 变量；Codex 额外按大小写不敏感规则移除 `CODEX_WINDOWS_REGISTERED_CORE`。不记录完整环境或原始 stderr。
 
 当前不声称同 OS 用户的 Agent 无法自行读取数据库；详见 [security-model.md](security-model.md)。真实测试分别为 `npm run test:e2e:codex` 与 `npm run test:e2e:claude`，可能消耗用户的服务额度。
+
+## 错误分类与重试
+
+运行时将进程错误归一化为 `quota_exceeded`、`rate_limited`、`auth_failed`、`agent_unavailable`、`agent_timeout`、`agent_protocol` 或 `agent_execution`。既有 `agent_resume`、`agent_environment` 和 `agent_reported_failure` 仍保留其语义。模式匹配根据 Codex 与 Claude Code 的进程输出判断，不保证覆盖所有版本；不会向 API 返回原始 stderr。
+
+`rate_limited` 和 `agent_timeout` 可按既有 Retry Policy 重试；额度、认证、CLI 不可用和协议错误不自动重试。明确的临时连接错误可重试，未知进程失败保守地不重试；明确标记为可重试的现有 `agent_execution` 或 `agent_reported_failure` 仍受策略和最大次数约束。旧错误记录无需迁移。
