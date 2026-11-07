@@ -165,6 +165,12 @@ async function main(): Promise<void> {
     const home =
       process.env.TASKCIRCUIT_HOME ?? join(homedir(), ".taskcircuit");
     const action = args[0];
+    if (action === "--help" || action === "-h") {
+      console.log(
+        "用法: taskcircuit runtime install | start | stop | restart | status | uninstall",
+      );
+      return;
+    }
     const waitStartupTask = async () => {
       const deadline = Date.now() + 20000;
       while (Date.now() < deadline) {
@@ -366,6 +372,12 @@ async function main(): Promise<void> {
   }
   if (command === "schedule") {
     const action = args.shift();
+    if (action === "--help" || action === "-h") {
+      console.log(
+        "用法: taskcircuit schedule list | add --event 类型 (--cron 表达式 [--timezone 时区] | --at 时间) | pause ID | resume ID | cancel ID",
+      );
+      return;
+    }
     if (action === "list") {
       print(await api("/api/schedules"));
       return;

@@ -15,3 +15,7 @@ temp/
 *.key
 credentials*
 taskcircuit.local.json
+runtime.json
+*.pid
+*.log
+*.db-journal

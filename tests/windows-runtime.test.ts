@@ -20,16 +20,19 @@ import { defaultConfig } from "../src/config.js";
 describe("Windows runtime contract", () => {
   it("keeps default task name stable and hashes custom home", () => {
     expect(
-      taskName("C:\\Users\\x\\.taskcircuit", "C:\\Users\\x\\.taskcircuit"),
+      taskName(
+        "C:\\workspace\\user\\.taskcircuit",
+        "C:\\workspace\\user\\.taskcircuit",
+      ),
     ).toBe("TaskCircuit");
     const name = taskName(
       "C:\\some private\\other",
-      "C:\\Users\\x\\.taskcircuit",
+      "C:\\workspace\\user\\.taskcircuit",
     );
     expect(name).toMatch(/^TaskCircuit-[0-9a-f]{8}$/);
     expect(name).not.toContain("private");
     expect(
-      taskName("C:\\some private\\other", "C:\\Users\\x\\.taskcircuit"),
+      taskName("C:\\some private\\other", "C:\\workspace\\user\\.taskcircuit"),
     ).toBe(name);
   });
   it("does not mistake stale metadata for a running instance or kill an unrelated pid", async () => {
