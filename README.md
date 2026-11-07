@@ -1,146 +1,184 @@
 # TaskCircuit
 
+**English** | [简体中文](./README.zh-CN.md)
+
 A durable local runtime for autonomous CLI agents.
 
-TaskCircuit turns one-shot CLI agents such as Codex and Claude Code into persistent work that can pause, resume, retry, wait for human input, schedule future execution, and continue across process restarts.
+> One task. Many executions. One durable lifecycle.
 
-## Why TaskCircuit
+## Why TaskCircuit?
 
-CLI agents usually run a command and exit. Longer work needs durable state, session resume, human interaction, retry, scheduling, recovery, and a way to observe progress. TaskCircuit provides the local runtime and orchestration for that work; it is not a model training, reasoning, or prompt framework.
+A CLI agent usually runs for one process or session. TaskCircuit keeps a task's state across runs so that work can continue after an agent exits or the runtime restarts. It handles orchestration around Codex and Claude Code rather than replacing their reasoning.
 
-## What it does
+- Accept configured events and create durable Work Items automatically.
+- Run multiple Executions for a Work Item and resume an Agent Session when available.
+- Ask → exit → answer → resume, without a process waiting for a human.
+- Continue with Later, Retry, or Cron; recover persisted work after restart.
+- Observe runtime changes over SSE and deliver durable notifications.
+- Run Hub and Worker in the background on Windows.
 
-V0.1 provides durable work items, executions, agent sessions and interactions; Codex and Claude Code adapters; ask, answer and resume; retry, later and cron scheduling; a runtime change feed, SSE, inbox and local notifications; and a Windows background launcher, Task Scheduler integration, Job Object, doctor and background logs. A mock adapter is included for the walkthrough below.
+A task can also fail, exhaust its retry policy, or be cancelled; completion is not guaranteed.
 
-## Architecture
+## How It Works
+
+```text
+Event → Route → Work Item → Execution → Worker → Agent Adapter → Codex / Claude Code
+```
 
 ```mermaid
 flowchart TD
-    CLI[CLI] --> Hub[Hub / Control Plane]
-    Scheduler[Scheduler] --> Hub
-    Hub --> SQLite[(SQLite)]
-    Hub --> Notifications[Notifications]
-    Worker[Worker] --> Hub
-    Worker --> Adapter[Agent Adapter]
+    Event --> Route --> WorkItem[Work Item]
+    WorkItem --> Execution --> Worker --> Adapter[Agent Adapter]
     Adapter --> Codex[Codex]
     Adapter --> Claude[Claude Code]
-    Adapter --> Mock[Mock]
-    Codex --> Session[Agent Session]
-    Claude --> Session
+    WorkItem -.-> Session[Agent Session]
+    WorkItem -.-> Interaction
+    WorkItem -.-> Schedule
+    WorkItem -.-> Changes[Runtime Changes]
+    Scheduler[Windows Task Scheduler] --> Launcher[Runtime Launcher]
+    Launcher --> Hub
+    Launcher --> Worker
+    Worker --> Hub
 ```
 
-On Windows, Task Scheduler starts the Runtime Launcher, which supervises the Hub and Worker within a Job Object. See [architecture](docs/architecture.md) and [Windows runtime](docs/windows-runtime.md).
+The diagram shows relationships and the Windows process arrangement; Hub persists and coordinates state in SQLite. See [architecture](docs/architecture.md).
 
-## Core model
+## Core Concepts
 
-A Work Item represents continuing work and can contain multiple Executions. An Execution is one attempt or continuation. Multiple Executions can resume the same Agent Session. An Interaction records a question and its human answer; an answer creates a continuation rather than leaving an agent process waiting.
+### Work Item
 
-## Quick start
+A long-lived task created by routing an event. **A Work Item is not an Execution**: one task may have several Executions while remaining the same Work Item.
 
-Install Node.js 24 or later. From the project directory, start the Hub in one terminal:
+### Execution
+
+A concrete run or attempt within a Work Item. Answering, Later, and Retry can create a new Execution.
+
+### Agent Session
+
+The persisted association with an external Codex or Claude Code conversation. Subsequent Executions can resume the same session when one has been established.
+
+### Interaction
+
+A persisted human question and answer. An ask ends the current execution; answering schedules a continuation.
+
+### Schedule
+
+A durable trigger for a user-defined once or Cron event, or a Work Item continuation due to Later or Retry.
+
+### Runtime Change
+
+A persisted, observable state transition in the change feed; it is distinct from an Interaction or Notification.
+
+### Notification
+
+A notice about an event requiring attention, with a Delivery record for a configured Channel. The included channel is local console; Inbox lists open Interactions.
+
+## Quick Start
+
+Use Node.js 24 or later. From the project directory, install and build:
 
 ```powershell
 npm ci
 npm run build
-npm exec -- taskcircuit hub
+npm link
+taskcircuit --version
+taskcircuit doctor
 ```
 
-In a second terminal in the same directory:
+`npm link` creates a global command for this user environment. Alternatively, omit it and prefix each command with `npm exec --` from the project directory.
+
+On Windows, install and start the background runtime:
 
 ```powershell
-npm exec -- taskcircuit worker
+taskcircuit runtime install
+taskcircuit runtime start
+taskcircuit runtime status
 ```
 
-In a third terminal, use the included mock adapter; no agent account is needed:
+Alternatively, run `taskcircuit hub` and `taskcircuit worker` in separate terminals from the project directory. Use this foreground option on other platforms. Do not run both options against the same port.
+
+Try the included Mock adapter without Codex or Claude credentials:
 
 ```powershell
-npm exec -- taskcircuit emit demo.mock.color
-npm exec -- taskcircuit inbox
+taskcircuit emit demo.color
+taskcircuit inbox
 ```
 
-Wait for the question, copy its interaction ID from the inbox, then replace the placeholder below:
+Wait for the question and copy its interaction ID from the inbox. Replace the placeholder with that ID; the included Mock choices are `蓝色` and `绿色`:
 
 ```powershell
-npm exec -- taskcircuit answer "<interaction-id>" 蓝色
-npm exec -- taskcircuit status
-npm exec -- taskcircuit work "<work-item-id>"
+taskcircuit answer "<interaction-id>" 蓝色
+taskcircuit status
+taskcircuit work "<work-item-id>"
 ```
 
-The worker resumes the work and completes it. Copy the work item ID from `status`. Stop the Hub and Worker with Ctrl+C. State persists in the user's TaskCircuit home; the default is `~/.taskcircuit`.
+Copy the work item ID from `status`; the Worker resumes the task and completes the demo. The default data home is `~/.taskcircuit`; `TASKCIRCUIT_HOME` overrides it. Stop foreground processes with Ctrl+C, or use `taskcircuit runtime stop` for the Windows background runtime.
 
-## Codex and Claude Code
+## Agent Support
 
-Install and authenticate the desired CLI yourself. The included configuration routes `demo.codex.color` and `demo.claude.color` to the corresponding agent; emit either event and use the same inbox and answer steps. Calls may consume provider quota. See [agent adapters](docs/agents.md).
+The current adapters support OpenAI Codex CLI and Anthropic Claude Code, plus Mock for local demonstrations. Install and authenticate each real CLI yourself. The included routes `demo.codex.color` and `demo.claude.color` use those adapters. Real runs may consume provider quota. The Adapter boundary allows future integrations; they are not included in V0.1. See [agent adapters](docs/agents.md).
 
-## Scheduling
+## Scheduling and Continuation
 
-Later and retry create durable schedules for work. User schedules can emit events once or on a five-field cron expression with a time zone. For example:
+A user Cron schedule follows `Schedule → Event → Route → Work Item → Execution`. A Later result or an eligible Retry schedules a new Execution instead of keeping the old process waiting; an answered Interaction also creates a continuation. Existing sessions can be reused. Missed Cron occurrences use one catch-up firing. See [scheduling](docs/scheduling.md).
 
 ```powershell
-npm exec -- taskcircuit schedule add --cron "0 9 * * *" --timezone Asia/Shanghai --event demo.cron
-npm exec -- taskcircuit schedule list
+taskcircuit schedule add --cron "0 9 * * *" --timezone Asia/Shanghai --event demo.cron
+taskcircuit schedule list
 ```
 
-Missed cron occurrences use a single catch-up firing. See [scheduling](docs/scheduling.md).
+## Realtime and Notifications
 
-## Human-in-the-loop
+Runtime Changes are exposed through an SSE stream; `taskcircuit watch` observes them. Notifications have Delivery records for Channels, while an Interaction is the actual human question and answer. The current built-in Channel is local console, and `taskcircuit inbox` lists open Interactions. See [realtime](docs/realtime.md) and [notifications](docs/notifications.md).
 
-An agent can return an ask result; TaskCircuit stores the interaction and ends that execution. Use `inbox` and `answer` to supply input, after which the worker can resume the same session.
+## Windows Runtime
 
-## Realtime and notifications
-
-The Hub exposes a replayable runtime change feed over SSE, an inbox and notifications. `taskcircuit watch` displays changes. The included local notification channel is described in [notifications](docs/notifications.md); stream retention and cursor behavior are documented in [realtime](docs/realtime.md).
-
-## Windows background runtime
-
-From the project directory, after building:
+Windows Task Scheduler starts the Runtime Launcher, which supervises Hub and Worker inside a Windows Job Object. The Job Object contains process lifetimes; it is not a filesystem security sandbox.
 
 ```powershell
-npm exec -- taskcircuit runtime install
-npm exec -- taskcircuit runtime start
-npm exec -- taskcircuit runtime status
-npm exec -- taskcircuit runtime stop
-npm exec -- taskcircuit runtime uninstall
+taskcircuit runtime install
+taskcircuit runtime start
+taskcircuit runtime stop
+taskcircuit runtime restart
+taskcircuit runtime status
+taskcircuit runtime uninstall
 ```
 
-Uninstall preserves TaskCircuit user data. The Windows At-Logon Task definition was inspected and manually started successfully. An actual Windows reboot/logon cycle was not performed during V0.1 validation. Windows startup integration was verified without destructive reboot/logoff testing.
+Uninstall preserves TaskCircuit user data. The At-Logon task definition was inspected and manually started successfully. An actual Windows reboot/logon cycle was not performed during V0.1 validation. See [Windows runtime](docs/windows-runtime.md).
 
-## Security model
+## Security Model
 
-V0.1 uses a Trusted Local execution model. Codex and Claude Code are installed by the user and run as that user. TaskCircuit does not intentionally expose control-plane database paths, internal state, or runtime secrets to agents. It does not provide OS-level filesystem isolation against a malicious process running as the same user. The Hub listens on loopback and does not provide public API authentication. Job Objects manage process lifetime, not security isolation. See [security model](docs/security-model.md).
+V0.1 uses **Trusted Local**: Codex and Claude Code are installed and run under the same OS user identity as TaskCircuit. TaskCircuit does not intentionally expose control-plane database paths, internal state, or runtime secrets to agents, but it does not provide OS-level filesystem isolation against a malicious process under that same identity. Hub listens on loopback without public API authentication. Sandboxed execution is planned, not implemented. See [security model](docs/security-model.md).
 
-## CLI
+## Architecture
 
-- `taskcircuit hub`, `worker`, `emit`, `work`, `status`, `inbox`, `answer`, `watch`
-- `taskcircuit schedule list/add/pause/resume/cancel`
-- `taskcircuit runtime install/start/stop/restart/status/uninstall`
-- `taskcircuit doctor`, `taskcircuit --version`
-
-When running from this checkout without a global install, prefix commands with `npm exec --`. Use `taskcircuit --help`, `taskcircuit schedule --help`, and `taskcircuit runtime --help` for usage.
+The Control Plane contains CLI, Hub, Scheduler, notification dispatcher, and SQLite. Worker fetches work from Hub and invokes the Agent Adapter. See [architecture and trust boundaries](docs/architecture.md).
 
 ## Development
 
 ```powershell
 npm ci
+npm run build
 npm run typecheck
 npm run format:check
 npm test
 npm audit
 ```
 
-Real-agent E2E tests are manual and require locally installed, authenticated CLIs. The Windows runtime E2E creates and cleans up an isolated test task. See [release checklist](docs/release-checklist.md).
+The [GitHub Actions configuration](.github/workflows/ci.yml) runs basic CI on Ubuntu and Windows with Node 24. Real Codex and Claude E2E tests are manual and need locally installed, authenticated CLIs; they do not run in CI. See the [release checklist](docs/release-checklist.md).
 
 ## Roadmap
 
-V0.1 is feature frozen. Execution isolation, a desktop control plane, external channels and sources, and remote or multi-user operation are future work; see [roadmap](docs/roadmap.md). Version labels there are tentative.
+**Current:** V0.1 local durable runtime as described above.
+
+**Planned:** execution isolation; a desktop control plane; external sources and notification channels; and, later, remote workers, multi-user operation, RBAC, and cloud runtime. Scope and version labels are tentative. See [roadmap](docs/roadmap.md).
 
 ## Limitations
 
-- Trusted Local, not OS sandbox isolation.
-- The background runtime integration currently targets Windows.
-- No desktop UI, remote workers, multi-user operation, or RBAC.
-- An actual reboot/logon cycle was not part of automated validation.
+- Trusted Local is not an OS sandbox; no multi-user or RBAC support.
+- Background runtime integration currently targets Windows; no desktop UI or remote workers.
+- An actual Windows reboot/logon cycle was not part of V0.1 validation.
 
 ## License
 
-TaskCircuit is licensed under the [MIT License](LICENSE).
+[MIT License](LICENSE). Copyright (c) 2026 MerLin.
