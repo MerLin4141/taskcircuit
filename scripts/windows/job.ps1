@@ -1,5 +1,6 @@
-param([Parameter(Mandatory=$true)][string]$Node,[Parameter(Mandatory=$true)][string]$Launcher,[Parameter(Mandatory=$true)][string]$RuntimeHome,[Parameter(Mandatory=$true)][string]$AppDir,[string]$WorkspaceRoot)
+param([Parameter(Mandatory=$true)][string]$Node,[Parameter(Mandatory=$true)][string]$Launcher,[Parameter(Mandatory=$true)][string]$RuntimeHome,[Parameter(Mandatory=$true)][string]$AppDir,[string]$WorkspaceRoot,[switch]$WaitForBootstrap)
 $ErrorActionPreference = 'Stop'
+if($WaitForBootstrap -and [Console]::ReadLine() -ne 'start'){throw 'Bootstrap handshake failed'}
 trap {
  try { $dir=Join-Path $RuntimeHome 'logs';New-Item -ItemType Directory -Force -Path $dir | Out-Null; $detail=[pscustomobject]@{timestamp=[DateTime]::UtcNow.ToString('o');component='windows-job';level='error';message='Job launcher failed';errorType=$_.Exception.GetType().Name;errorCode=$_.Exception.HResult;nativeCode=$_.Exception.NativeErrorCode;stage=$step};Add-Content -LiteralPath (Join-Path $dir 'runtime.log') -Value ($detail | ConvertTo-Json -Compress) -Encoding utf8 } catch {}
  exit 1

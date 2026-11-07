@@ -17,6 +17,9 @@ describe.skipIf(process.platform !== "win32")(
       const script = join(process.cwd(), "scripts", "windows", "task.ps1");
       const harness = `
 function Get-ScheduledTask { param($TaskName) }
+function New-Item { param($ItemType,$Path,[switch]$Force) }
+function Test-Path { param($LiteralPath) return $false }
+function Add-Type { param($TypeDefinition,$OutputType,$OutputAssembly) }
 function New-ScheduledTaskAction { param($Execute, $Argument, $WorkingDirectory) [pscustomobject]@{execute=$Execute; arguments=$Argument; workingDirectory=$WorkingDirectory} }
 function New-ScheduledTaskTrigger { param([switch]$AtLogOn, $User) return 'trigger' }
 function New-ScheduledTaskPrincipal { param($UserId, $LogonType, $RunLevel) return 'principal' }
@@ -39,7 +42,12 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Principal,$S
         arguments: string;
         workingDirectory: string;
       };
-      expect(action.execute.toLowerCase()).toBe(powershell.toLowerCase());
+      expect(action.execute).toMatch(
+        /TaskCircuitBootstrap-[a-f0-9]{16}\.exe$/i,
+      );
+      expect(action.arguments.toLowerCase()).toContain(
+        powershell.toLowerCase(),
+      );
       expect(action.arguments).toMatch(/(?:^|\s)-NoProfile(?:\s|$)/i);
       expect(action.arguments).toMatch(/(?:^|\s)-NonInteractive(?:\s|$)/i);
       expect(action.arguments).toMatch(

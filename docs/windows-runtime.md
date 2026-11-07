@@ -2,6 +2,8 @@
 
 TaskCircuit 使用当前登录用户的 Windows Startup Task，不安装 Windows Service，也不要求默认提升管理员权限。任务在用户登录时启动一个 Windows Job Object 持有进程；它把 Runtime Launcher 放进带 `KILL_ON_JOB_CLOSE` 的 Job 后才允许启动 Hub 和 Worker。Worker 的 Agent 子进程继承包含关系。Job Object 只管理生命周期，并非文件系统或网络安全隔离。
 
+后台启动使用无控制台的 Windows 程序启动 PowerShell，并等待其退出；安装时由 Windows PowerShell 5.1 和系统 .NET Framework 编译该程序，保存于 TaskCircuit Home。启动器不改变 Job Object 的进程管理。已有安装升级后需要再次执行 `taskcircuit runtime install` 更新计划任务。
+
 命令：`taskcircuit runtime install`、`start`、`stop`、`restart`、`status`、`uninstall` 和 `run`。install 注册或更新当前用户登录触发任务，使用 Interactive 和 Limited，不启动 Agent；start 不会隐式安装；uninstall 先停止运行时、删除启动任务并保留数据库和工作数据。已存在但不属于 TaskCircuit 的同名任务不会被覆盖或删除。
 
 默认 Home 使用 `TaskCircuit` 任务名；自定义 Home 使用路径的短哈希作为后缀。动作使用安装时解析出的绝对 Node、脚本和应用路径，不依赖 shell profile。测试只使用随机 `TaskCircuit-Test-...` 任务并清理。程序文件和用户状态分开；Home 可由 `TASKCIRCUIT_HOME` 指定。

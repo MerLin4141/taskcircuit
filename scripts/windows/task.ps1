@@ -9,7 +9,15 @@ if($Action -eq 'install') {
  function Quote-TaskArg([string]$Value) { return '"' + ($Value -replace '(\\+)$','$1$1') + '"' }
  $arguments='-NoProfile -NonInteractive -WindowStyle Hidden -File ' + (Quote-TaskArg $JobScript) + ' -Node ' + (Quote-TaskArg $Node) + ' -Launcher ' + (Quote-TaskArg $Launcher) + ' -RuntimeHome ' + (Quote-TaskArg $RuntimeHome) + ' -AppDir ' + (Quote-TaskArg $AppDir)
  if($WorkspaceRoot){if($WorkspaceRoot.Contains('"')){throw 'Invalid workspace path'};$arguments += ' -WorkspaceRoot ' + (Quote-TaskArg $WorkspaceRoot)}
- $taskAction=New-ScheduledTaskAction -Execute $psExe -Argument $arguments -WorkingDirectory $AppDir
+ $source=Join-Path $PSScriptRoot 'bootstrap.cs'
+ $hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($source))).Replace('-','').Substring(0,16).ToLowerInvariant()
+ $runtimeDir=Join-Path $RuntimeHome 'runtime'
+ New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+ $bootstrap=Join-Path $runtimeDir ("TaskCircuitBootstrap-$hash.exe")
+ if(-not (Test-Path -LiteralPath $bootstrap)) {
+  Add-Type -TypeDefinition (Get-Content -LiteralPath $source -Raw) -OutputType WindowsApplication -OutputAssembly $bootstrap
+ }
+ $taskAction=New-ScheduledTaskAction -Execute $bootstrap -Argument ((Quote-TaskArg $psExe) + ' ' + $arguments + ' -WaitForBootstrap') -WorkingDirectory $AppDir
  $identity=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
  $trigger=New-ScheduledTaskTrigger -AtLogOn -User $identity
  $principal=New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
