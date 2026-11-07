@@ -464,6 +464,39 @@ export function createHub(
       ).map(shape),
     };
   };
+  hub.post<{ Params: { id: string } }>(
+    "/api/workers/:id/heartbeat",
+    async (req) => {
+      const body = req.body;
+      if (
+        !object(body) ||
+        !["online", "stopped"].includes(String(body.status)) ||
+        !str(req.params.id) ||
+        req.params.id.length > 200
+      )
+        return bad("Worker 状态不正确");
+      run(
+        "INSERT INTO worker_presence(id,status,last_seen_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,last_seen_at=excluded.last_seen_at",
+        req.params.id,
+        String(body.status),
+        now(),
+      );
+      return { ok: true };
+    },
+  );
+  hub.get("/api/workers", async () =>
+    all(
+      "SELECT id,status,last_seen_at FROM worker_presence ORDER BY last_seen_at DESC",
+    ).map((row) => ({
+      ...shape(row),
+      state:
+        row.status === "stopped"
+          ? "stopped"
+          : clockNow() - Date.parse(String(row.last_seen_at)) <= 30000
+            ? "online"
+            : "stale",
+    })),
+  );
   hub.get("/api/health", async () => ({ ok: true, service: "taskcircuit" }));
   const scheduleWork = (
     workId: string,

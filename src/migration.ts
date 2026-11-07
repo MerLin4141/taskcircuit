@@ -38,6 +38,7 @@ CREATE TRIGGER changes_schedule_insert AFTER INSERT ON schedules BEGIN INSERT IN
 CREATE TRIGGER changes_schedule_status AFTER UPDATE OF status ON schedules WHEN OLD.status<>NEW.status AND NEW.status IN ('paused','active','cancelled') BEGIN INSERT INTO runtime_changes(type,entity_type,entity_id,work_item_id,payload,created_at) VALUES(CASE NEW.status WHEN 'paused' THEN 'schedule.paused' WHEN 'active' THEN 'schedule.resumed' ELSE 'schedule.cancelled' END,'schedule',NEW.id,CASE WHEN NEW.owner_kind='work_item' THEN NEW.owner_id ELSE NULL END,json_object('status',NEW.status),NEW.updated_at); END;
 CREATE TRIGGER changes_schedule_fired AFTER INSERT ON schedule_firings BEGIN INSERT INTO runtime_changes(type,entity_type,entity_id,work_item_id,payload,created_at) SELECT 'schedule.fired','schedule',s.id,CASE WHEN s.owner_kind='work_item' THEN s.owner_id ELSE NULL END,json_object('scheduledFor',NEW.scheduled_for),NEW.created_at FROM schedules s WHERE s.id=NEW.schedule_id; END;
 `;
+const fourth = `CREATE TABLE worker_presence(id TEXT PRIMARY KEY,status TEXT NOT NULL,last_seen_at TEXT NOT NULL);`;
 export function migrate(db: DatabaseSync): void {
   db.exec(
     "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -66,6 +67,14 @@ export function migrate(db: DatabaseSync): void {
     ) {
       db.exec(third);
       db.prepare("INSERT INTO schema_migrations VALUES(3,?)").run(
+        new Date().toISOString(),
+      );
+    }
+    if (
+      !db.prepare("SELECT version FROM schema_migrations WHERE version=4").get()
+    ) {
+      db.exec(fourth);
+      db.prepare("INSERT INTO schema_migrations VALUES(4,?)").run(
         new Date().toISOString(),
       );
     }

@@ -1,7 +1,5 @@
 # 架构与信任边界
 
-Control Plane 包括 CLI、Hub、Scheduler、NotificationDispatcher 和 SQLite：Hub 在事务内记录领域状态、Runtime Change、通知与投递。Scheduler 处理持久计划；独立 Dispatcher 投递通知；SSE 客户端从 SQLite 顺序读取持久变化。Worker 仅经 HTTP 获取工作并提交结果。
+Control Plane 包括 CLI、Hub、Scheduler、NotificationDispatcher 和 SQLite；执行 Worker 经 HTTP 获取任务并调用 Agent Adapter。Windows Startup Task 启动 Job Object 持有进程和 Runtime Launcher，后者监督 Hub 与 Worker，并在异常退出时关闭另一组件。
 
-Execution Plane 包括 Worker、Agent Adapter、mock/Codex/Claude 和独立 workspace。当前是 trusted-local 逻辑边界，不声称同 OS 用户的 Agent 无法自行访问其他文件。未来 sandboxed 才要求 OS 或运行时强制隔离。Hub 默认仅监听回环地址，尚无身份认证。
-
-详见 [security-model.md](security-model.md)、[scheduling.md](scheduling.md)、[realtime.md](realtime.md) 和 [notifications.md](notifications.md)。
+Job Object 用于进程树生命周期，不是 OS 安全隔离。当前仍为 trusted-local：Agent 与 Worker 使用同一操作系统用户，不声称阻止 Agent 自行访问其他文件。Hub 默认仅监听回环地址。详见 [windows-runtime.md](windows-runtime.md)、[security-model.md](security-model.md) 和 [scheduling.md](scheduling.md)。

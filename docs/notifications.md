@@ -7,3 +7,5 @@ NotificationDispatcher 独立于 Scheduler，通过持久队列和 30 秒租约�
 回答在同一事务中解决 Interaction 和关联 Notification、取消 queued/claimed Delivery 并生成新 Execution。已开始调用通道的发送无法撤回；回答后的状态不会再被该调用改回 sent，后续也不会继续重试。
 
 `GET /api/inbox` 返回按创建时间从早到晚的 open Interaction，不包含外部 session ID。`taskcircuit inbox` 显示 ID、工作、标题、选项和等待时间；使用 `taskcircuit answer <id> <回答>` 回复。Hub 升级旧数据库时会为已有 open Interaction 补建通知和投递记录。
+
+Windows 后台 Runtime 将本地通知的通用投递记录写入轮转日志；不写完整 Agent 提示词或会话 ID。

@@ -15,3 +15,5 @@ V0.1 的 Codex、Claude Code 和 mock 使用 `trusted-local`：CLI Agent 由用�
 Scheduler 仅将计划配置的事件 payload 交给 Event Router；内部计划、数据库路径和状态根不进入 Agent context。Retry 次数只传给 Adapter，不放入 Agent 提示词。
 
 Runtime Change 仅保存最少状态，不包含完整提示词、环境、外部 session ID 或内部路径；通知只使用任务标题和通用通知文字。SSE、Inbox 和通知接口沿用仅回环监听的 trusted-local 边界，不提供公网认证。
+
+Windows Job Object 是进程生命周期包含机制，不提供文件系统、凭据或网络隔离；Runtime 仍使用 trusted-local。启动任务使用当前交互式用户、Limited 权限。stop 通过实例身份和本机命名管道定位运行时，不按进程名称批量终止。

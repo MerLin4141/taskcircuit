@@ -138,6 +138,15 @@
       "agent": "claude-demo",
       "title": "Later 试跑",
       "instruction": "第一次请返回 later，afterSeconds 必须为 2，message 为稍后继续。恢复后返回 complete，message 必须精确为「TaskCircuit Claude Later 试跑通过」，不含界定符和标点。"
+    },
+    {
+      "id": "mock-lease",
+      "event": {
+        "source": "local",
+        "type": "demo.lease"
+      },
+      "agent": "mock-demo",
+      "title": "试跑 lease"
     }
   ],
   "channels": {

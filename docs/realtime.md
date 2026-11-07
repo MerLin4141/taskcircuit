@@ -7,3 +7,5 @@ External Event 是触发工作的外部事实；Runtime Change 是 Hub 已提交
 `GET /api/stream/head` 返回当前 sequence。Hub 启动和每分钟维护时最多保留最近 10,000 条；游标在已清理范围内时连接返回 409 `stream_cursor_expired`。已连接客户端落后时收到 `event: resync` 并断开，应刷新状态再连接。`taskcircuit watch --after N` 可观察变化。
 
 `GET /api/state` 返回有限的最近工作、活跃工作、Inbox、活跃计划和 sequence。它们不是严格原子的快照与游标：客户端应按 sequence 去重，必要时完整刷新。`taskcircuit watch` 默认从 0 重放；游标过期时应刷新并使用当前 head。
+
+Worker presence 心跳不写入变化流。Windows 后台 Runtime 可由前台 `taskcircuit watch` 连接。

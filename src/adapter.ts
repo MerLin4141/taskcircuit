@@ -16,6 +16,15 @@ export interface AgentAdapter {
 export class MockAgentAdapter implements AgentAdapter {
   async execute(input: AgentExecutionInput): Promise<AgentResult> {
     const context = input.context as { type?: string } | null;
+    if (context?.type === "demo.lease") {
+      await new Promise((resolve) => setTimeout(resolve, 15000));
+      return {
+        type: "completed",
+        sessionId:
+          input.externalSessionId ?? `mock-session-${input.workItemId}`,
+        output: "TaskCircuit Lease 试跑通过",
+      };
+    }
     if (context?.type === "demo.later")
       return input.externalSessionId
         ? {

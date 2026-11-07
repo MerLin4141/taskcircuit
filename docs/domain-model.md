@@ -1,7 +1,7 @@
 # 领域模型
 
-Work Item 表示长期工作；Execution 表示一次进程执行，记录 sequence、triggerKind、parentExecutionId 和 retryAttempt。Agent Session 保存与 TaskCircuit 自身 ID 分开的外部会话标识；Interaction 保存问题和回答。Event 是外部触发事实，经 Route 选择 Agent Profile。
+Work Item 表示长期工作；Execution 表示一次执行，记录触发来源与重试链路。Agent Session 与外部 CLI 会话 ID 分开；Interaction 保存人工问题和回答。Event 是外部触发事实，经 Route 选择 Agent Profile。
 
-Schedule 可以是 once 或 cron；Schedule Firing 唯一标识一次触发。Work Item 状态为 active、waiting_input、waiting_schedule、completed、failed 或 cancelled。
+Schedule 和 Schedule Firing 描述持久触发；Runtime Change 是已提交状态变化的可重放记录。Notification 是需要通知人的事项，Delivery 记录通道投递及租约。
 
-Runtime Change 是已提交状态变化的可重放记录，与外部 Event 不同；单调 sequence 用作流游标。Notification 是需要通知人的事项，Delivery 记录向一个 Channel 的投递状态及租约。Interaction 和 Notification 各自持久化、通过 interaction ID 关联。
+Worker presence 记录 Worker ID、状态及最近心跳；Hub 根据最近心跳计算 online/stale，不将心跳写入 Runtime Change。Windows Runtime 身份与 PID 文件为本地运行管理信息，不替代领域持久状态。

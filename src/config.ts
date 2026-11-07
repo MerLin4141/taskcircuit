@@ -50,7 +50,7 @@ export const defaultConfig: Config = {
       agent: "demo-agent",
       title: "颜色试跑",
     },
-    ...["later", "retry", "retry.exhaust", "cron"].map((kind) => ({
+    ...["later", "retry", "retry.exhaust", "cron", "lease"].map((kind) => ({
       id: `mock-${kind}`,
       event: { source: "local", type: `demo.${kind}` },
       agent: "mock-demo",

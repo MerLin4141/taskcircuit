@@ -19,7 +19,8 @@
     "test:e2e:claude": "npm run build && node scripts/e2e.mjs claude",
     "test:e2e:codex-later": "npm run build && node scripts/e2e-later.mjs codex",
     "test:e2e:claude-later": "npm run build && node scripts/e2e-later.mjs claude",
-    "pretest": "npm run build"
+    "pretest": "npm run build",
+    "test:e2e:windows-runtime": "npm run build && node scripts/e2e-windows-runtime.mjs"
   },
   "dependencies": {
     "cron-parser": "^5.10.4",
