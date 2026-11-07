@@ -6,6 +6,12 @@ A durable local runtime for autonomous CLI agents.
 
 > One task. Many executions. One durable lifecycle.
 
+### What's new in v0.1.1
+
+- Human-readable output for `status`, `work`, `inbox`, `runtime status`, and `doctor`, with `--json` for scripts.
+- More specific Codex / Claude error classification and retry decisions.
+- Windows background runtime startup without a persistent console window.
+
 ## Why TaskCircuit?
 
 A CLI agent usually runs for one process or session. TaskCircuit keeps a task's state across runs so that work can continue after an agent exits or the runtime restarts. It handles orchestration around Codex and Claude Code rather than replacing their reasoning.

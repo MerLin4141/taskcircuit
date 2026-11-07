@@ -6,6 +6,12 @@ TaskCircuit 是一个面向 Codex、Claude Code 等 CLI Agent 的本地持久化
 
 > 一个任务，多次执行，同一生命周期，直到真正完成。
 
+### v0.1.1 更新
+
+- `status`、`work`、`inbox`、`runtime status` 和 `doctor` 默认提供人类可读输出，并支持 `--json`。
+- 改进 Codex / Claude 错误分类和重试判断。
+- 修复 Windows 后台运行时常驻黑色控制台窗口的问题。
+
 ## 为什么需要 TaskCircuit？
 
 普通 CLI Agent 往往围绕一次进程或会话工作。TaskCircuit 在 Agent 之上管理持久化任务生命周期：配置的事件到来后，经路由创建 Work Item（长期任务），再通过一个或多个 Execution（执行）驱动 Agent。当 Agent 提问、延迟继续或需要重试时，当前进程可以退出；任务状态、Agent Session（Agent 会话）、Interaction（人工交互）和 Schedule（调度）由运行时保存，条件满足后可以创建新的 Execution 并在已有会话时恢复该会话。

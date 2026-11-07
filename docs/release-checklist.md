@@ -25,3 +25,16 @@
 - [x] 没有运行时数据被 Git 跟踪
 
 Windows At-Logon Task definition has been inspected and manually started successfully. An actual Windows reboot/logon cycle was not performed during V0.1 validation. Windows startup integration verified without destructive reboot/logoff testing.
+
+## V0.1.1 发布准备
+
+- [x] 版本提升至 0.1.1，package-lock 同步
+- [x] 更新双语 README 并添加发布说明
+- [x] 格式、类型、测试和 npm audit
+- [x] Windows Runtime 与 Mock 回归
+- [ ] 本次提交的 Ubuntu CI
+- [ ] 本次提交的 Windows CI
+- [ ] 创建 v0.1.1 tag（本轮不执行）
+- [ ] 创建 GitHub Release（本轮不执行）
+- [ ] npm 发布（本轮不执行，包保持 private）
+- [ ] 实际 Windows 重启和登录周期（未测试）
