@@ -7,7 +7,7 @@ if($Action -eq 'install') {
  foreach($value in @($Node,$Launcher,$RuntimeHome,$AppDir,$JobScript)){if(-not $value -or $value.Contains('"')){throw 'Invalid task path'}}
  $psExe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
  function Quote-TaskArg([string]$Value) { return '"' + ($Value -replace '(\\+)$','$1$1') + '"' }
- $arguments='-NoProfile -NonInteractive -File ' + (Quote-TaskArg $JobScript) + ' -Node ' + (Quote-TaskArg $Node) + ' -Launcher ' + (Quote-TaskArg $Launcher) + ' -RuntimeHome ' + (Quote-TaskArg $RuntimeHome) + ' -AppDir ' + (Quote-TaskArg $AppDir)
+ $arguments='-NoProfile -NonInteractive -WindowStyle Hidden -File ' + (Quote-TaskArg $JobScript) + ' -Node ' + (Quote-TaskArg $Node) + ' -Launcher ' + (Quote-TaskArg $Launcher) + ' -RuntimeHome ' + (Quote-TaskArg $RuntimeHome) + ' -AppDir ' + (Quote-TaskArg $AppDir)
  if($WorkspaceRoot){if($WorkspaceRoot.Contains('"')){throw 'Invalid workspace path'};$arguments += ' -WorkspaceRoot ' + (Quote-TaskArg $WorkspaceRoot)}
  $taskAction=New-ScheduledTaskAction -Execute $psExe -Argument $arguments -WorkingDirectory $AppDir
  $identity=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
