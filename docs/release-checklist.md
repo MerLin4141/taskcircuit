@@ -38,3 +38,19 @@ Windows At-Logon Task definition has been inspected and manually started success
 - [ ] 创建 GitHub Release（本轮不执行）
 - [ ] npm 发布（本轮不执行，包保持 private）
 - [ ] 实际 Windows 重启和登录周期（未测试）
+
+## V0.1.2 发布候选检查
+
+- [x] P0 不确定执行保护与取消传播
+- [x] P1 结果确认与租约隔离
+- [x] Scheduler 时钟回拨和重复 firing 隔离
+- [x] Fake Codex / Claude CLI
+- [x] Codex 0.167.0 与 Claude Code 2.1.318 真实 E2E（Later 未测试）
+- [x] Windows 运行时和隔离进程测试
+- [ ] Linux 进程组清理（NOT TESTED，本版本不作为主要验证平台）
+- [ ] Windows reboot / logoff-login（NOT TESTED）
+- [x] Migration：不需要；schema 版本未变
+- [x] 完整测试、类型、格式、构建和 npm audit
+- [x] 扫描明显真实密钥、会话 ID 和本地路径；未发现已验证泄露
+- [x] 公开范围已确定：本地比较文档明确排除，公开文件不依赖它
+- [ ] 人工审核发布候选；不在本轮提交或发布

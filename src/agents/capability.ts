@@ -8,6 +8,12 @@ export interface Executable {
   prefix: string[];
 }
 export function supportsCli(kind: "codex" | "claude", help: string): boolean {
+  if (
+    /\b(?:unknown|unrecognized|unsupported|invalid)\s+(?:option|argument|flag)\b/i.test(
+      help,
+    )
+  )
+    return false;
   return kind === "codex"
     ? help.includes("--json") && help.includes("resume")
     : help.includes("--print") &&
@@ -62,5 +68,11 @@ export async function detectCli(
     env: agentEnvironment(process.env, kind),
     timeoutMs: 10000,
   });
-  return result.exitCode === 0 && supportsCli(kind, result.stdout);
+  return (
+    result.exitCode === 0 &&
+    supportsCli(kind, result.stdout) &&
+    !/\b(?:unknown|unrecognized|unsupported|invalid)\s+(?:option|argument|flag)\b/i.test(
+      result.stderr,
+    )
+  );
 }

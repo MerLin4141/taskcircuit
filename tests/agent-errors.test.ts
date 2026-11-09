@@ -75,6 +75,6 @@ describe("agent failure classification", () => {
         args: ["-e", "setInterval(()=>{},1000)"],
         timeoutMs: 50,
       }),
-    ).rejects.toMatchObject({ code: "agent_timeout", retryable: true });
+    ).rejects.toMatchObject({ code: "agent_timeout", retryable: false });
   });
 });

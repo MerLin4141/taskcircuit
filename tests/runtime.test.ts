@@ -84,16 +84,15 @@ describe("TaskCircuit runtime", () => {
     now += 15000;
     expect((await claim(hub, "c")).statusCode).toBe(204);
     now += 16000;
-    const second = (await claim(hub, "c")).json();
-    expect(second.execution.id).toBe(first.execution.id);
+    expect((await claim(hub, "c")).statusCode).toBe(204);
+    const detail = (
+      await hub.inject(`/api/work-items/${first.execution.workItemId}`)
+    ).json();
+    expect(detail.executions[0].error.code).toBe("execution_outcome_unknown");
     expect(
       (await submit(hub, first, { type: "failed", error: "stale" }, owner))
         .statusCode,
     ).toBe(409);
-    expect(
-      (await submit(hub, second, { type: "failed", error: "test" }, "c"))
-        .statusCode,
-    ).toBe(200);
     await hub.close();
   });
   it("reopens an ask and resumes the same session exactly once", async () => {

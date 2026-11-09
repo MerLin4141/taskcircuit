@@ -6,6 +6,12 @@ TaskCircuit 是一个面向 Codex、Claude Code 等 CLI Agent 的本地持久化
 
 > 一个任务，多次执行，同一生命周期，直到真正完成。
 
+### v0.1.2 可靠性更新
+
+- Agent 执行结果不明时需要核实，不会自动重做；取消和租约失权会传递给受管理的进程。
+- 持久回执可确认 Hub 已提交的结果，无需重跑 Agent；Cron 每次调度使用同一个墙上时钟快照。
+- Windows 是主要验证平台；Linux 进程组清理及 Windows 实际重启／重新登录恢复尚未验证。
+
 ### v0.1.1 更新
 
 - `status`、`work`、`inbox`、`runtime status` 和 `doctor` 默认提供人类可读输出，并支持 `--json`。

@@ -30,7 +30,12 @@ const detail = (hub: ReturnType<typeof createHub>, id: string) =>
   hub.inject(`/api/work-items/${id}`).then((r) => r.json());
 const failed = {
   type: "failed",
-  error: { code: "agent_execution", message: "transient", retryable: true },
+  error: {
+    code: "agent_execution",
+    message: "transient",
+    retryable: true,
+    safeToRetry: true,
+  },
 };
 describe("durable schedules", () => {
   it("enforces later payload exclusivity", () => {
@@ -123,8 +128,8 @@ describe("durable schedules", () => {
     ["auth_failed", false],
     ["agent_unavailable", false],
     ["agent_protocol", false],
-    ["rate_limited", true],
-    ["agent_timeout", true],
+    ["rate_limited", false],
+    ["agent_timeout", false],
   ])("routes %s retry eligibility safely", async (code, shouldRetry) => {
     const hub = createHub(":memory:", defaultConfig);
     try {
@@ -132,7 +137,12 @@ describe("durable schedules", () => {
       const c = (await claim(hub)).json();
       await result(hub, c, {
         type: "failed",
-        error: { code, message: "safe", retryable: true },
+        error: {
+          code,
+          message: "safe",
+          retryable:
+            code === "rate_limited" || code === "agent_timeout" || shouldRetry,
+        },
       });
       const d = await detail(hub, w.id);
       expect(d.workItem.status).toBe(
@@ -158,9 +168,19 @@ describe("durable schedules", () => {
       const c = (await claim(hub)).json();
       await result(hub, c, {
         type: "failed",
-        error: { code: "agent_execution", message: "legacy", retryable: true },
+        error: { code: "agent_execution", message: "legacy", retryable: false },
       });
       await hub.close();
+      const legacyDb = new DatabaseSync(path);
+      legacyDb.prepare("UPDATE executions SET error=? WHERE id=?").run(
+        JSON.stringify({
+          code: "agent_execution",
+          message: "legacy",
+          retryable: true,
+        }),
+        c.execution.id,
+      );
+      legacyDb.close();
       hub = createHub(path, defaultConfig);
       expect((await detail(hub, item.id)).executions[0].error).toEqual({
         code: "agent_execution",

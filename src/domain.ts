@@ -51,7 +51,15 @@ export type AgentResult =
   | {
       type: "failed";
       sessionId?: string;
-      error: string | { code: string; message: string; retryable?: boolean };
+      error:
+        | string
+        | {
+            code: string;
+            message: string;
+            retryable?: boolean;
+            causeCode?: string;
+            safeToRetry?: boolean;
+          };
     };
 export class TaskCircuitError extends Error {
   constructor(

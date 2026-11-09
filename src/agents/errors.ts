@@ -3,6 +3,8 @@ export class AgentError extends Error {
     public readonly code: string,
     message: string,
     public readonly retryable = false,
+    public readonly outcomeUnknown = false,
+    public readonly safeToRetry = false,
   ) {
     super(message);
     this.name = this.constructor.name;
@@ -15,6 +17,20 @@ export class AgentUnavailableError extends AgentError {
       "Agent CLI is unavailable. Check that it is installed.",
     );
   }
+}
+export function classifyStartFailure(error: unknown): AgentError {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : "";
+  return ["EAGAIN", "EMFILE", "ENFILE"].includes(code)
+    ? new AgentExecutionError(
+        "Agent process could not be started temporarily.",
+        true,
+        false,
+        true,
+      )
+    : new AgentUnavailableError();
 }
 export class AgentAuthenticationError extends AgentError {
   constructor() {
@@ -30,8 +46,13 @@ export class AgentProtocolError extends AgentError {
   }
 }
 export class AgentExecutionError extends AgentError {
-  constructor(message = "Agent execution failed", retryable = false) {
-    super("agent_execution", message, retryable);
+  constructor(
+    message = "Agent execution failed",
+    retryable = false,
+    outcomeUnknown = false,
+    safeToRetry = false,
+  ) {
+    super("agent_execution", message, retryable, outcomeUnknown, safeToRetry);
   }
 }
 export class AgentResumeError extends AgentError {
@@ -47,7 +68,7 @@ export class AgentEnvironmentError extends AgentError {
 
 export class AgentTimeoutError extends AgentError {
   constructor() {
-    super("agent_timeout", "Agent execution timed out.", true);
+    super("agent_timeout", "Agent execution timed out.", false, true);
   }
 }
 export function classifyAgentFailure(

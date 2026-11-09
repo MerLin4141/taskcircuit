@@ -1,6 +1,11 @@
 import Fastify from "fastify";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import {
+  resultDigest,
+  validDigest,
+  validSubmissionId,
+} from "./result-receipt.js";
 import { migrate } from "./migration.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
@@ -113,6 +118,8 @@ export function createHub(
       agent_unavailable: "Agent failed: CLI unavailable",
       agent_timeout: "Agent failed: timed out",
       agent_protocol: "Agent failed: invalid response",
+      execution_outcome_unknown:
+        "执行结果需要核实；Agent 可能已经执行了外部操作，系统不会自动重新执行。",
     };
     const body =
       kind === "interaction_required"
@@ -661,7 +668,18 @@ export function createHub(
           req.params.id,
         );
         run(
-          "UPDATE executions SET status='cancelled',finished_at=?,lease_token=NULL WHERE work_item_id=? AND status IN ('queued','running','claimed','retry_wait')",
+          "UPDATE executions SET status='failed',error=?,finished_at=?,lease_token=NULL WHERE work_item_id=? AND status='running'",
+          json({
+            code: "execution_outcome_unknown",
+            message:
+              "执行结果需要核实。Agent 可能已经执行了外部操作；系统不会自动重新执行。请核实外部结果后再决定如何处理。",
+            retryable: false,
+          }),
+          time,
+          req.params.id,
+        );
+        run(
+          "UPDATE executions SET status='cancelled',finished_at=?,lease_token=NULL WHERE work_item_id=? AND status IN ('queued','claimed','retry_wait')",
           time,
           req.params.id,
         );
@@ -673,16 +691,30 @@ export function createHub(
       }),
   );
   const tickScheduler = (): number => {
+    const tickNow = clockNow();
+    const time = new Date(tickNow).toISOString();
+    tx(() => expireExecutions(time));
+    const isolated = new Set<string>();
     let count = 0;
     for (;;) {
       const fired = tx(() => {
-        const time = now();
+        const exclusions = [...isolated];
         const schedule = get(
-          "SELECT * FROM schedules WHERE status='active' AND next_fire_at<=? ORDER BY next_fire_at,id LIMIT 1",
+          `SELECT * FROM schedules WHERE status='active' AND next_fire_at<=?${exclusions.length ? ` AND id NOT IN (${exclusions.map(() => "?").join(",")})` : ""} ORDER BY next_fire_at,id LIMIT 1`,
           time,
+          ...exclusions,
         );
-        if (!schedule) return false;
+        if (!schedule) return null;
         const scheduledFor = String(schedule.next_fire_at);
+        const scheduleId = String(schedule.id);
+        if (
+          get(
+            "SELECT id FROM schedule_firings WHERE schedule_id=? AND scheduled_for=?",
+            scheduleId,
+            scheduledFor,
+          )
+        )
+          return { duplicate: true, scheduleId, scheduledFor };
         const firingId = randomUUID();
         run(
           "INSERT INTO schedule_firings(id,schedule_id,scheduled_for,created_at) VALUES(?,?,?,?)",
@@ -692,11 +724,14 @@ export function createHub(
           time,
         );
         if (schedule.owner_kind === "user") {
-          const created = createEvent({
-            source: schedule.source,
-            type: schedule.event_type,
-            payload: JSON.parse(String(schedule.payload)),
-          });
+          const created = createEvent(
+            {
+              source: schedule.source,
+              type: schedule.event_type,
+              payload: JSON.parse(String(schedule.payload)),
+            },
+            time,
+          );
           run(
             "UPDATE schedule_firings SET event_id=? WHERE id=?",
             String(created.event?.id),
@@ -711,6 +746,51 @@ export function createHub(
             "SELECT * FROM work_items WHERE id=?",
             String(schedule.owner_id),
           );
+          if (
+            parent &&
+            work &&
+            work.status === "waiting_schedule" &&
+            schedule.reason === "retry"
+          ) {
+            const previousError: unknown = parent.error
+              ? JSON.parse(String(parent.error))
+              : null;
+            if (!object(previousError) || previousError.safeToRetry !== true) {
+              const unknown = {
+                code: "execution_outcome_unknown",
+                causeCode: object(previousError)
+                  ? String(previousError.code ?? "")
+                  : "",
+                message:
+                  "执行结果需要核实。Agent 可能已经执行了外部操作；系统不会自动重新执行。请核实外部结果后再决定如何处理。",
+                retryable: false,
+              };
+              run(
+                "UPDATE executions SET error=? WHERE id=?",
+                json(unknown),
+                String(parent.id),
+              );
+              run(
+                "UPDATE work_items SET status='failed',updated_at=? WHERE id=?",
+                time,
+                String(work.id),
+              );
+              run(
+                "UPDATE schedules SET status='cancelled',next_fire_at=NULL,updated_at=? WHERE id=?",
+                time,
+                String(schedule.id),
+              );
+              createNotification(
+                String(work.id),
+                null,
+                "work_item_failed",
+                String(work.title),
+                time,
+                "execution_outcome_unknown",
+              );
+              return true;
+            }
+          }
           if (parent && work && work.status === "waiting_schedule") {
             const executionId = randomUUID();
             const retry = schedule.reason === "retry";
@@ -746,7 +826,7 @@ export function createHub(
             ? nextCron(
                 String(schedule.expression),
                 String(schedule.timezone),
-                clockNow(),
+                tickNow,
               )
             : null;
         run(
@@ -760,6 +840,17 @@ export function createHub(
         return true;
       });
       if (!fired) break;
+      if (typeof fired === "object" && fired.duplicate) {
+        isolated.add(fired.scheduleId);
+        console.error(
+          JSON.stringify({
+            type: "schedule_firing_duplicate",
+            scheduleId: fired.scheduleId,
+            scheduledFor: fired.scheduledFor,
+          }),
+        );
+        continue;
+      }
       count++;
     }
     return count;
@@ -786,13 +877,13 @@ export function createHub(
   hub.addHook("onClose", async () => {
     if (timer) clearInterval(timer);
   });
-  const createEvent = (b: Row) => {
+  const createEvent = (b: Row, eventTime?: string) => {
     const route = config.routes.find(
       (r) => r.event.source === b.source && r.event.type === b.type,
     );
     if (!route) return missing();
     const profile = config.agents[route.agent];
-    const time = now(),
+    const time = eventTime ?? now(),
       eventId = randomUUID(),
       workId = randomUUID(),
       executionId = randomUUID();
@@ -930,15 +1021,53 @@ export function createHub(
       });
     },
   );
+  const unknownExecutionError = {
+    code: "execution_outcome_unknown",
+    message:
+      "执行结果需要核实。Agent 可能已经执行了外部操作；系统不会自动重新执行。请核实外部结果后再决定如何处理。",
+    retryable: false,
+  };
+  const expireExecutions = (time = now()) => {
+    for (const e of all(
+      "SELECT id,work_item_id FROM executions WHERE status='running' AND lease_expires_at<=?",
+      time,
+    )) {
+      run(
+        "UPDATE executions SET status='failed',error=?,finished_at=?,lease_token=NULL WHERE id=? AND status='running' AND lease_expires_at<=?",
+        json(unknownExecutionError),
+        time,
+        String(e.id),
+        time,
+      );
+      run(
+        "UPDATE schedules SET status='cancelled',updated_at=? WHERE parent_execution_id=? AND status IN ('active','paused')",
+        time,
+        String(e.id),
+      );
+      run(
+        "UPDATE work_items SET status='failed',updated_at=? WHERE id=? AND status='active'",
+        time,
+        String(e.work_item_id),
+      );
+      createNotification(
+        String(e.work_item_id),
+        null,
+        "work_item_failed",
+        "执行结果需要核实",
+        time,
+        "execution_outcome_unknown",
+      );
+    }
+  };
   hub.post("/api/executions/claim", async (req, reply) => {
     const b = req.body;
     if (!object(b) || !str(b.workerId)) return bad("请提供 workerId");
     const workerId = b.workerId;
     const result = tx(() => {
+      expireExecutions();
       const time = now();
       const e = get(
-        "SELECT * FROM executions WHERE (status='queued' AND not_before<=?) OR (status='running' AND lease_expires_at<=?) ORDER BY created_at,sequence LIMIT 1",
-        time,
+        "SELECT * FROM executions WHERE status='queued' AND not_before<=? ORDER BY created_at,sequence LIMIT 1",
         time,
       );
       if (!e) return null;
@@ -1012,6 +1141,49 @@ export function createHub(
       });
     },
   );
+  const receiptKey = "taskcircuitResultReceiptsV1";
+  const findReceipt = (executionId: string): Row | null => {
+    const row = get(
+      "SELECT w.metadata FROM executions e JOIN work_items w ON w.id=e.work_item_id WHERE e.id=?",
+      executionId,
+    );
+    if (!row) return null;
+    const metadata: unknown = JSON.parse(String(row.metadata));
+    if (!object(metadata)) throw new Error("invalid work metadata");
+    const ledger = metadata[receiptKey];
+    if (ledger === undefined) return null;
+    if (!object(ledger)) throw new Error("invalid receipt ledger");
+    const receipt = ledger[executionId];
+    if (receipt === undefined) return null;
+    if (!object(receipt)) throw new Error("invalid receipt");
+    return receipt;
+  };
+  hub.get<{
+    Params: { id: string; submissionId: string };
+    Querystring: { digest?: string };
+  }>("/api/executions/:id/result-submissions/:submissionId", async (req) => {
+    if (
+      !validSubmissionId(req.params.submissionId) ||
+      !validDigest(req.query.digest)
+    )
+      return bad("回执参数不正确");
+    const receipt = findReceipt(req.params.id);
+    if (!receipt || receipt.submissionId !== req.params.submissionId)
+      return { status: "not_found" };
+    if (receipt.resultDigest !== req.query.digest) {
+      console.error(
+        JSON.stringify({
+          component: "hub",
+          event: "result_receipt_conflict",
+          message: "结果回执冲突",
+          executionId: req.params.id,
+          submissionId: req.params.submissionId,
+        }),
+      );
+      return conflict();
+    }
+    return { status: "committed", receipt };
+  });
   hub.post<{ Params: { id: string } }>(
     "/api/executions/:id/result",
     async (req) => {
@@ -1024,6 +1196,29 @@ export function createHub(
       )
         return bad("结果格式不正确");
       const result = b.result;
+      const hasIdentity =
+        b.submissionId !== undefined || b.resultDigest !== undefined;
+      if (
+        hasIdentity &&
+        (!validSubmissionId(b.submissionId) || !validDigest(b.resultDigest))
+      )
+        return bad("结果提交身份不正确");
+      const wireDigest = hasIdentity ? resultDigest(result) : null;
+      if (
+        result.type === "failed" &&
+        object(result.error) &&
+        (result.error.code === "agent_timeout" ||
+          (result.error.retryable === true &&
+            result.error.safeToRetry !== true))
+      ) {
+        result.error = {
+          code: "execution_outcome_unknown",
+          causeCode: String(result.error.code),
+          message:
+            "执行结果需要核实。Agent 可能已经执行了外部操作；系统不会自动重新执行。请核实外部结果后再决定如何处理。",
+          retryable: false,
+        };
+      }
       if (
         !["completed", "needs_input", "failed", "later"].includes(
           String(result.type),
@@ -1069,6 +1264,28 @@ export function createHub(
       )
         return bad("失败结果不正确");
       return tx(() => {
+        if (hasIdentity) {
+          const receipt = findReceipt(req.params.id);
+          if (receipt) {
+            if (
+              receipt.submissionId === b.submissionId &&
+              receipt.resultDigest === b.resultDigest &&
+              wireDigest === b.resultDigest
+            )
+              return { status: "already_committed", receipt };
+            console.error(
+              JSON.stringify({
+                component: "hub",
+                event: "result_submission_conflict",
+                message: "结果提交冲突",
+                executionId: req.params.id,
+                submissionId: b.submissionId,
+              }),
+            );
+            return conflict();
+          }
+          if (wireDigest !== b.resultDigest) return bad("结果摘要不匹配");
+        }
         const e = valid(req.params.id, b);
         if (!e) return conflict();
         const time = now();
@@ -1186,7 +1403,6 @@ export function createHub(
             [
               "agent_execution",
               "rate_limited",
-              "agent_timeout",
               "agent_reported_failure",
             ].includes(String(err.code));
           const attempt = Number(e.retry_attempt);
@@ -1227,6 +1443,39 @@ export function createHub(
               status === "failed" ? String(err?.code ?? "") : undefined,
             );
           }
+        }
+        if (hasIdentity) {
+          const work = get(
+            "SELECT metadata,status FROM work_items WHERE id=?",
+            String(e.work_item_id),
+          );
+          const current = get(
+            "SELECT status FROM executions WHERE id=?",
+            req.params.id,
+          );
+          if (!work || !current) throw new Error("missing committed state");
+          const metadata: unknown = JSON.parse(String(work.metadata));
+          if (!object(metadata)) throw new Error("invalid work metadata");
+          const existing = metadata[receiptKey];
+          if (existing !== undefined && !object(existing))
+            throw new Error("invalid receipt ledger");
+          const ledger = object(existing) ? existing : {};
+          const receipt = {
+            executionId: req.params.id,
+            submissionId: b.submissionId,
+            resultDigest: b.resultDigest,
+            acceptedAt: time,
+            executionStatus: String(current.status),
+            workItemStatus: String(work.status),
+          };
+          ledger[req.params.id] = receipt;
+          metadata[receiptKey] = ledger;
+          run(
+            "UPDATE work_items SET metadata=? WHERE id=?",
+            json(metadata),
+            String(e.work_item_id),
+          );
+          return { status: "accepted", receipt };
         }
         return { ok: true };
       });

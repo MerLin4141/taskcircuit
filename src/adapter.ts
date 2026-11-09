@@ -11,13 +11,33 @@ export interface AgentExecutionInput {
   retryAttempt?: number;
 }
 export interface AgentAdapter {
-  execute(input: AgentExecutionInput): Promise<AgentResult>;
+  execute(
+    input: AgentExecutionInput,
+    signal?: AbortSignal,
+  ): Promise<AgentResult>;
 }
 export class MockAgentAdapter implements AgentAdapter {
-  async execute(input: AgentExecutionInput): Promise<AgentResult> {
+  async execute(
+    input: AgentExecutionInput,
+    signal?: AbortSignal,
+  ): Promise<AgentResult> {
     const context = input.context as { type?: string } | null;
     if (context?.type === "demo.lease") {
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      await new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new Error("执行已中止"));
+          return;
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", abort);
+          resolve();
+        }, 15000);
+        const abort = () => {
+          clearTimeout(timer);
+          reject(new Error("执行已中止"));
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+      });
       return {
         type: "completed",
         sessionId:
@@ -49,6 +69,7 @@ export class MockAgentAdapter implements AgentAdapter {
             code: "agent_execution",
             message: "模拟临时故障",
             retryable: true,
+            safeToRetry: true,
           },
         };
       return {

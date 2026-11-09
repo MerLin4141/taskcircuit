@@ -79,7 +79,9 @@ export function formatWorkItem(value: unknown): string {
       );
   }
   if (
-    (w.status === "failed" || w.status === "waiting_schedule") &&
+    (w.status === "failed" ||
+      w.status === "waiting_schedule" ||
+      w.status === "cancelled") &&
     last.error
   ) {
     const e = row(last.error);
@@ -90,6 +92,11 @@ export function formatWorkItem(value: unknown): string {
       `Retryable: ${e.retryable === true ? "yes" : "no"}`,
       text(e.message ?? last.error),
     );
+    if (e.code === "execution_outcome_unknown")
+      out.push(
+        "执行结果需要核实。Agent 可能已经执行了外部操作。",
+        "系统不会自动重新执行；请核实外部结果后再决定如何处理。",
+      );
   }
   if (
     w.status === "completed" &&

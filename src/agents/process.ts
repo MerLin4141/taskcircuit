@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import {
   AgentExecutionError,
   AgentTimeoutError,
-  AgentUnavailableError,
+  classifyStartFailure,
 } from "./errors.js";
 export interface ProcessSpec {
   executable: string;
@@ -35,15 +36,87 @@ export class ProcessRunner implements Runner {
           env: spec.env,
           shell: false,
           windowsHide: true,
+          detached: process.platform !== "win32",
           stdio: "pipe",
         });
-      } catch {
-        reject(new AgentUnavailableError());
+      } catch (error) {
+        reject(classifyStartFailure(error));
         return;
       }
+      let spawned = false;
+      child.once("spawn", () => {
+        spawned = true;
+      });
       let stdout = "",
         stderr = "",
         reason = "";
+      let forceTimer: ReturnType<typeof setTimeout> | undefined;
+      let stopDeadline: ReturnType<typeof setTimeout> | undefined;
+      let cleanup: Promise<void> | undefined;
+      let terminating = false;
+      const terminate = () => {
+        if (terminating || !child.pid) return;
+        terminating = true;
+        stopDeadline = setTimeout(
+          () =>
+            reject(
+              new AgentExecutionError(
+                "Agent process termination could not be confirmed",
+                false,
+                true,
+              ),
+            ),
+          4000,
+        );
+        if (process.platform === "win32") {
+          cleanup = new Promise<void>((resolve) => {
+            const taskkill = join(
+              process.env.SystemRoot ?? "C:\\Windows",
+              "System32",
+              "taskkill.exe",
+            );
+            let finished = false;
+            const done = (failed: boolean) => {
+              if (finished) return;
+              finished = true;
+              clearTimeout(forceTimer);
+              if (
+                failed &&
+                child.exitCode === null &&
+                child.signalCode === null
+              )
+                child.kill();
+              resolve();
+            };
+            try {
+              const killer = spawn(
+                taskkill,
+                ["/PID", String(child.pid), "/T", "/F"],
+                { windowsHide: true, stdio: "ignore" },
+              );
+              killer.once("error", () => done(true));
+              killer.once("exit", (code) => done(code !== 0));
+              forceTimer = setTimeout(() => done(true), 2000);
+            } catch {
+              done(true);
+            }
+          });
+        } else {
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            child.kill();
+          }
+          cleanup = new Promise<void>((resolve) => {
+            forceTimer = setTimeout(() => {
+              try {
+                process.kill(-child.pid!, "SIGKILL");
+              } catch {}
+              resolve();
+            }, 200);
+          });
+        }
+      };
       const limit = 4 * 1024 * 1024;
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
@@ -51,35 +124,48 @@ export class ProcessRunner implements Runner {
         stdout += chunk;
         if (stdout.length > limit) {
           reason = "Agent 输出过大";
-          child.kill();
+          terminate();
         }
       });
       child.stderr.on("data", (chunk: string) => {
         stderr += chunk;
         if (stderr.length > limit) {
           reason = "Agent 错误输出过大";
-          child.kill();
+          terminate();
         }
       });
       const abort = () => {
-        reason = "Agent 执行已中止";
-        child.kill();
+        if (!reason) reason = "Agent 执行已中止";
+        terminate();
       };
       spec.signal?.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(() => {
-        reason = "Agent 执行超时";
-        child.kill();
+        if (!reason) reason = "Agent 执行超时";
+        terminate();
       }, spec.timeoutMs);
-      child.on("error", () => {
+      child.on("error", async (error) => {
         clearTimeout(timer);
+        if (spawned) {
+          terminate();
+          if (cleanup) await cleanup;
+          clearTimeout(stopDeadline);
+        }
         spec.signal?.removeEventListener("abort", abort);
-        reject(new AgentUnavailableError());
+        reject(
+          spawned
+            ? new AgentExecutionError("Agent process error", false, true)
+            : classifyStartFailure(error),
+        );
       });
-      child.on("close", (exitCode) => {
+      child.on("close", async (exitCode) => {
         clearTimeout(timer);
+        if (cleanup) await cleanup;
+        clearTimeout(stopDeadline);
+        clearTimeout(forceTimer);
         spec.signal?.removeEventListener("abort", abort);
         if (reason === "Agent 执行超时") reject(new AgentTimeoutError());
-        else if (reason) reject(new AgentExecutionError(reason));
+        else if (reason)
+          reject(new AgentExecutionError(reason, false, spawned));
         else resolve({ exitCode, stdout, stderr });
       });
       child.stdin.on("error", () => {});

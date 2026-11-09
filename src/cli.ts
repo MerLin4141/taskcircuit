@@ -107,13 +107,11 @@ async function main(): Promise<void> {
   }
   if (command === "worker") {
     const workerId = `worker-${randomUUID()}`;
-    if (args.includes("--once")) {
-      await workOnce(base, workerId);
-      return;
-    }
     let stopping = false;
+    const shutdown = new AbortController();
     const stop = () => {
       stopping = true;
+      shutdown.abort();
     };
     process.on("message", (message: unknown) => {
       if (
@@ -125,6 +123,10 @@ async function main(): Promise<void> {
     });
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+    if (args.includes("--once")) {
+      await workOnce(base, workerId, undefined, shutdown.signal);
+      return;
+    }
     const presence = async (status: "online" | "stopped") => {
       try {
         await api(
@@ -143,7 +145,10 @@ async function main(): Promise<void> {
     try {
       while (!stopping) {
         try {
-          if (!(await workOnce(base, workerId)) && !stopping)
+          if (
+            !(await workOnce(base, workerId, undefined, shutdown.signal)) &&
+            !stopping
+          )
             await new Promise((r) => setTimeout(r, 1000));
         } catch (e) {
           console.error(

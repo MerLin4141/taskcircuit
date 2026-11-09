@@ -1,0 +1,38 @@
+{
+  "codex": {
+    "valid": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.started\",\"item\":{\"type\":\"tool_call\"}}\n{\"type\":\"future.extension\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}}\n{\"type\":\"turn.completed\"}\n",
+    "malformed": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.started\",\"item\":{\"type\":\"tool_call\"}}\n{\"type\":\"future.extension\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}}\n{\"type\":\"turn.completed\"}\nnot-json\n",
+    "truncated": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.started\",\"item\":{\"type\":\"tool_call\"}}\n{\"type\":\"future.extension\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}}\n{\"type\":\"turn.completed\"}\n{\"type\":",
+    "empty": "",
+    "intermediate": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.started\"}\n",
+    "missing_session": "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}}\n",
+    "missing_message": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"turn.completed\"}\n",
+    "mismatch": "{\"type\":\"thread.started\",\"thread_id\":\"other-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}}\n",
+    "ask": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"ask\\\",\\\"message\\\":\\\"input\\\",\\\"interaction\\\":{\\\"title\\\":\\\"choose\\\",\\\"text\\\":\\\"choose\\\",\\\"key\\\":\\\"choice\\\",\\\"options\\\":[\\\"yes\\\"]}}\"}}\n{\"type\":\"turn.completed\"}\n",
+    "fail": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"fail\\\",\\\"message\\\":\\\"error\\\",\\\"retryable\\\":true}\"}}\n{\"type\":\"turn.completed\"}\n"
+  },
+  "claude": {
+    "valid": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}",
+    "malformed": "{not-json",
+    "truncated": "{\"session_id\":",
+    "empty": "",
+    "missing_session": "{\"result\": \"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}",
+    "empty_session": "{\"session_id\": \"\", \"result\": \"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}",
+    "missing_message": "{\"session_id\": \"fake-session\"}",
+    "mismatch": "{\"session_id\": \"other-session\", \"result\": \"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}",
+    "is_error": "{\"is_error\": true, \"session_id\": \"fake-session\", \"result\": \"error\"}",
+    "ask": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"ask\\\",\\\"message\\\":\\\"input\\\",\\\"interaction\\\":{\\\"title\\\":\\\"choose\\\",\\\"text\\\":\\\"choose\\\",\\\"key\\\":\\\"choice\\\",\\\"options\\\":[\\\"yes\\\"]}}\"}",
+    "fail": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"fail\\\",\\\"message\\\":\\\"error\\\",\\\"retryable\\\":true}\"}"
+  },
+  "errors": {
+    "rate": "HTTP 429 too many requests",
+    "quota": "quota exceeded",
+    "auth": "authentication failed",
+    "environment": "sandbox initialization failed",
+    "unknown": "unrecognized provider failure"
+  },
+  "help": {
+    "codex": "codex exec commands: resume; options: --json",
+    "claude": "claude options: --print --output-format --resume"
+  }
+}

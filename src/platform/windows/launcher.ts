@@ -182,9 +182,13 @@ if (busy) {
             if (value.component === "notification")
               log.write("notification", "info", "本地通知已投递");
             else if (
-              ["Hub 已启动", "开始执行", "执行结果已保存"].includes(
-                value.message ?? "",
-              )
+              [
+                "Hub 已启动",
+                "开始执行",
+                "执行结果已保存",
+                "结果提交冲突",
+                "结果回执冲突",
+              ].includes(value.message ?? "")
             )
               log.write(name, "info", String(value.message));
             else log.write(name, "info", "组件运行记录");

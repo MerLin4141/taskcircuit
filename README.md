@@ -6,6 +6,12 @@ A durable local runtime for autonomous CLI agents.
 
 > One task. Many executions. One durable lifecycle.
 
+### v0.1.2 reliability update
+
+- Uncertain Agent executions require verification instead of automatic replay; cancellation and lease loss propagate to managed processes.
+- Durable result receipts confirm Hub commits without rerunning the Agent. Cron uses a single wall-clock snapshot per scheduler tick.
+- Windows is the primary validated platform. Linux process-group cleanup and actual Windows reboot/logon recovery have not been tested.
+
 ### What's new in v0.1.1
 
 - Human-readable output for `status`, `work`, `inbox`, `runtime status`, and `doctor`, with `--json` for scripts.

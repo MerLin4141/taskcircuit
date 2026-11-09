@@ -15,3 +15,9 @@ Launcher 通过当前 Home 的命名管道和随机实例身份防止重复启�
 `logs/runtime.log` 保存有限的结构化运行记录，达到 10 MB 后轮转，保留最多 5 个旧文件；不记录完整环境、Agent 提示词或外部会话 ID。本地通知也记录通用投递信息。`taskcircuit doctor` 检查 Node、Home、SQLite、Hub、Worker、启动任务和可用 Agent CLI；Codex Windows sandbox 未主动验证。
 
 测试验证任务定义及手动启动，不执行 Windows reboot、logoff 或用户切换，因此真实重启与登录后的自动启动尚未验证。
+
+## v0.1.2 执行与取消
+
+用户取消、Worker 停止或租约失权时，Worker 会请求停止当前受管理的 Agent 进程；无法确认的执行结果标记为 `execution_outcome_unknown`，不会因超时或租约过期而自动重做。终止进程无法撤销已经发送的外部请求。Windows Job Object 和进程树清理属于进程生命周期管理，不提供文件、网络或凭据隔离，也不是操作系统安全沙箱。真实 Agent 取消测试确认了直接进程退出，但没有独立验证所有脱离的后代进程。
+
+Windows 是主要验证平台；实际 reboot 或 logoff/login 周期未测试。Linux 进程组清理未验证。
