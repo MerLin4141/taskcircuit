@@ -2,6 +2,7 @@ import type { AgentResult } from "./domain.js";
 export interface AgentExecutionInput {
   workItemId: string;
   executionId: string;
+  executionSequence?: number;
   workingDirectory: string;
   instruction: string;
   context: unknown;
@@ -22,6 +23,17 @@ export class MockAgentAdapter implements AgentAdapter {
     signal?: AbortSignal,
   ): Promise<AgentResult> {
     const context = input.context as { type?: string } | null;
+    if (context?.type === "demo.loop") {
+      const sessionId =
+        input.externalSessionId ?? `mock-session-${input.workItemId}`;
+      return (input.executionSequence ?? 1) < 3
+        ? { type: "continue", sessionId, message: "继续试跑" }
+        : {
+            type: "completed",
+            sessionId,
+            output: "TaskCircuit 自主循环试跑通过",
+          };
+    }
     if (context?.type === "demo.lease") {
       await new Promise<void>((resolve, reject) => {
         if (signal?.aborted) {

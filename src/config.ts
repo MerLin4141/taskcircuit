@@ -30,6 +30,10 @@ export interface Config {
   routes: Route[];
   schedules?: ConfigSchedule[];
   channels?: Record<string, { type: "local-console" }>;
+  policyWorkspaces?: Record<
+    string,
+    { path: string; allowedRoot: string; allowedCapabilities: string[] }
+  >;
 }
 export const defaultConfig: Config = {
   channels: { local: { type: "local-console" } },
@@ -44,6 +48,12 @@ export const defaultConfig: Config = {
     },
   },
   routes: [
+    {
+      id: "demo-loop",
+      event: { source: "local", type: "demo.loop" },
+      agent: "mock-demo",
+      title: "自主循环试跑",
+    },
     {
       id: "demo-color",
       event: { source: "local", type: "demo.color" },

@@ -41,6 +41,7 @@ export interface Question {
 export type AgentResult =
   | { type: "needs_input"; sessionId: string; request: Question }
   | { type: "completed"; sessionId: string; output: string }
+  | { type: "continue" | "stop"; sessionId: string; message: string }
   | {
       type: "later";
       sessionId: string;

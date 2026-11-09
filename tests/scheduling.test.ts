@@ -3,7 +3,8 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
+import { createHub as createV012Hub } from "./fixtures/v012-runtime/hub.js";
 import { defaultConfig } from "../src/config.js";
 import { DatabaseSync } from "node:sqlite";
 import { fork } from "node:child_process";
@@ -78,6 +79,7 @@ describe("durable schedules", () => {
       const next = (await claim(hub)).json();
       expect(next.execution.id).not.toBe(c.execution.id);
       expect(next.execution.agentSessionId).toBe(sid);
+      expect(next.workItem.rootId).toBe(created.workItem.rootId);
       expect(next.agentSession.externalSessionId).toBe("external");
       expect(next.execution.triggerKind).toBe("scheduled_resume");
       expect(
@@ -103,6 +105,7 @@ describe("durable schedules", () => {
       const item = (await create(hub, "demo.retry.exhaust")).json().workItem;
       for (let n = 0; n < 3; n++) {
         const c = (await claim(hub)).json();
+        expect(c.workItem.rootId).toBe(item.rootId);
         expect(c.execution.retryAttempt).toBe(n);
         expect((await result(hub, c, failed)).statusCode).toBe(200);
         const d = await detail(hub, item.id);
@@ -383,7 +386,7 @@ describe("durable schedules", () => {
   it("retains phase 2 records when applying the second migration", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tc-upgrade-"));
     const path = join(dir, "db");
-    let h = createHub(path, defaultConfig, undefined, 0);
+    let h = createV012Hub(path, defaultConfig, undefined, 0);
     try {
       const w = (await create(h, "demo.color")).json().workItem;
       const c = (await claim(h)).json();
@@ -403,7 +406,7 @@ describe("durable schedules", () => {
         "DROP TABLE schedule_firings; DROP TABLE schedules; ALTER TABLE executions DROP COLUMN retry_attempt; ALTER TABLE executions DROP COLUMN parent_execution_id; ALTER TABLE executions DROP COLUMN trigger_kind; DELETE FROM schema_migrations WHERE version=2",
       );
       db.close();
-      h = createHub(path, defaultConfig, undefined, 0);
+      h = createV012Hub(path, defaultConfig, undefined, 0);
       const d = await detail(h, w.id);
       expect(d.workItem.status).toBe("waiting_input");
       expect(d.agentSession.externalSessionId).toBe("old-session");

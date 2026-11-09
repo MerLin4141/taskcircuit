@@ -90,6 +90,12 @@ export class CodexAdapter implements AgentAdapter {
         true,
       );
     }
+    if (parsed.kind === "continue" || parsed.kind === "stop")
+      return {
+        type: parsed.kind,
+        sessionId: session as string,
+        message: parsed.message,
+      };
     if (parsed.kind === "later")
       return {
         type: "later",

@@ -1,6 +1,6 @@
 // Guards transient heartbeat errors and a commit racing with a stale heartbeat response.
 import { describe, expect, it } from "vitest";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 import { workOnce } from "../src/worker.js";
 import type { AgentAdapter } from "../src/adapter.js";

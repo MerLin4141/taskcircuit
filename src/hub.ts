@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { existsSync, realpathSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import {
@@ -7,6 +8,33 @@ import {
   validSubmissionId,
 } from "./result-receipt.js";
 import { migrate } from "./migration.js";
+import { migrateDomain, createDefinition } from "./automation-domain.js";
+import { loopConfig } from "./loop-limits.js";
+import { migrateLoopLimits } from "./loop-limits.js";
+import {
+  claimCandidateSql,
+  inspectAdmission,
+  terminateForLimit,
+  recoverContinuations,
+  expireQueuedAutomations,
+} from "./execution-admission.js";
+import {
+  migrateMaterialization,
+  materializeDecision,
+  processPendingMaterializations,
+} from "./decision-materialization.js";
+import {
+  migrateDecisionCore,
+  evaluateDecision,
+  getDecision,
+  listRootDecisions,
+  processPendingDecisions,
+} from "./decision-core.js";
+import {
+  migrateEventCore,
+  ingestEvent,
+  type EventEnvelope,
+} from "./event-core.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
 import {
@@ -57,10 +85,45 @@ export function createHub(
   options: HubOptions = {},
 ) {
   const clockNow = typeof clock === "function" ? clock : () => clock.now();
+  if (path !== ":memory:" && !existsSync(path))
+    throw new TaskCircuitError(
+      "storage_generation_required",
+      "请先完成存储代际切换。",
+      409,
+    );
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
-  db.exec("PRAGMA busy_timeout=5000");
-  migrate(db);
+  try {
+    if (path === ":memory:") {
+      db.exec("PRAGMA foreign_keys=ON");
+      migrate(db);
+      db.exec(
+        "CREATE TABLE taskcircuit_generation(migration_id TEXT NOT NULL,generation INTEGER NOT NULL); INSERT INTO taskcircuit_generation VALUES('memory',2); INSERT INTO schema_migrations VALUES(5,'1970-01-01T00:00:00.000Z')",
+      );
+    } else {
+      const generation = db
+        .prepare(
+          "SELECT name FROM sqlite_schema WHERE type='table' AND name='taskcircuit_generation'",
+        )
+        .get();
+      if (!generation)
+        throw new TaskCircuitError(
+          "storage_generation_required",
+          "请先完成存储代际切换。",
+          409,
+        );
+    }
+    db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
+    db.exec("PRAGMA busy_timeout=5000");
+    migrate(db);
+    migrateDomain(db);
+    migrateEventCore(db);
+    migrateDecisionCore(db);
+    migrateMaterialization(db);
+    migrateLoopLimits(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   const hub = Fastify({ logger: false });
   const run = (sql: string, ...args: SQLInputValue[]) =>
     db.prepare(sql).run(...args);
@@ -68,6 +131,75 @@ export function createHub(
     db.prepare(sql).get(...args) as Row | undefined;
   const all = (sql: string, ...args: SQLInputValue[]) =>
     db.prepare(sql).all(...args) as Row[];
+  const rootSummary = (id: string): Row | null => {
+    const root = get(
+      `SELECT r.id,r.status,r.terminal_reason,r.created_at,r.deadline_at,r.max_runs,d.name automation FROM automation_roots r JOIN automation_definitions d ON d.id=r.definition_id WHERE r.id=?`,
+      id,
+    );
+    if (!root) return null;
+    const work = get(
+      `SELECT id,status,agent_profile_id FROM work_items WHERE root_id=? ORDER BY created_at DESC LIMIT 1`,
+      id,
+    );
+    const execution = work
+      ? get(
+          `SELECT status,output,error FROM executions WHERE work_item_id=? ORDER BY sequence DESC LIMIT 1`,
+          String(work.id),
+        )
+      : undefined;
+    const runs = get(
+      `SELECT count(*) AS n FROM executions e JOIN work_items w ON w.id=e.work_item_id WHERE w.root_id=? AND e.started_at IS NOT NULL`,
+      id,
+    );
+    const schedule = work
+      ? get(
+          `SELECT next_fire_at FROM schedules WHERE owner_kind='work_item' AND owner_id=? AND status='active' ORDER BY next_fire_at LIMIT 1`,
+          String(work.id),
+        )
+      : undefined;
+    let feedback: unknown = null;
+    let errorCode: unknown = null;
+    try {
+      if (typeof execution?.output === "string") {
+        const value: unknown = JSON.parse(execution.output);
+        if (object(value) && typeof value.feedback === "string")
+          feedback = value.feedback;
+      }
+    } catch {}
+    try {
+      if (typeof execution?.error === "string") {
+        const value: unknown = JSON.parse(execution.error);
+        if (object(value) && typeof value.code === "string")
+          errorCode = value.code;
+      }
+    } catch {}
+    return {
+      id: root.id,
+      automation: root.automation,
+      status: root.status,
+      reason: root.terminal_reason,
+      started: root.created_at,
+      deadline: root.deadline_at,
+      maxRuns: root.max_runs,
+      runs: runs?.n ?? 0,
+      agent: work?.agent_profile_id ?? null,
+      waiting: work?.status ?? null,
+      nextRun: schedule?.next_fire_at ?? null,
+      latestFeedback: feedback,
+      errorCode,
+    };
+  };
+  hub.get("/api/roots", async () =>
+    all(
+      "SELECT id FROM automation_roots ORDER BY created_at DESC LIMIT 100",
+    ).map((r) => rootSummary(String(r.id))),
+  );
+  hub.get<{ Params: { id: string } }>(
+    "/api/roots/:id",
+    async (req, reply) =>
+      rootSummary(req.params.id) ??
+      reply.code(404).send({ error: "Root not found" }),
+  );
   const now = () => new Date(clockNow()).toISOString();
   const expiry = () => new Date(clockNow() + 30000).toISOString();
   const tx = <T>(fn: () => T): T => {
@@ -442,16 +574,109 @@ export function createHub(
   const bad = (message: string): never => {
     throw new TaskCircuitError("invalid_request", message, 400);
   };
-  hub.setErrorHandler((error, _, reply) => {
+  hub.setErrorHandler((error, request, reply) => {
     const e =
       error instanceof TaskCircuitError
         ? error
-        : new TaskCircuitError("internal_error", "服务处理失败", 500);
+        : error instanceof Error &&
+            "code" in error &&
+            error.code === "FST_ERR_CTP_BODY_TOO_LARGE" &&
+            request.url.startsWith("/api/events/v2")
+          ? new TaskCircuitError("event_too_large", "请求内容过大", 413)
+          : new TaskCircuitError("internal_error", "服务处理失败", 500);
     reply.code(e.status).send({ error: { code: e.code, message: e.message } });
   });
   const missing = () => {
     throw new TaskCircuitError("not_found", "没有找到对应记录", 404);
   };
+  const automationSummary = (id: string): Row | null => {
+    const row = get(
+      `SELECT d.id,d.name,d.status,v.config_snapshot_json FROM automation_definitions d JOIN automation_definition_versions v ON v.definition_id=d.id AND v.version=d.current_version WHERE d.id=?`,
+      id,
+    );
+    if (!row) return null;
+    const snapshot: unknown = JSON.parse(String(row.config_snapshot_json));
+    if (!object(snapshot) || !object(snapshot.policy))
+      return { id: row.id, name: row.name, status: row.status };
+    const policy = snapshot.policy,
+      loop = loopConfig(snapshot);
+    return {
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      eventType: Array.isArray(policy.eventTypes) ? policy.eventTypes[0] : null,
+      agent: policy.agentProfileId,
+      workspace: policy.workspacePath,
+      ...loop,
+    };
+  };
+  hub.get("/api/automations", async () =>
+    all(
+      "SELECT id FROM automation_definitions WHERE id<>'system/manual' ORDER BY created_at,id",
+    ).map((x) => automationSummary(String(x.id))),
+  );
+  hub.get<{ Params: { id: string } }>(
+    "/api/automations/:id",
+    async (req) => automationSummary(req.params.id) ?? missing(),
+  );
+  hub.post("/api/automations", async (req) => {
+    const b = req.body;
+    if (
+      !object(b) ||
+      typeof b.id !== "string" ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(b.id) ||
+      typeof b.eventType !== "string" ||
+      typeof b.agent !== "string" ||
+      typeof b.workspace !== "string" ||
+      (b.instruction !== undefined && typeof b.instruction !== "string")
+    )
+      return bad("自动化参数不正确");
+    const id = b.id,
+      eventType = b.eventType,
+      agent = b.agent,
+      workspace = b.workspace;
+    if (
+      !config.agents[agent] ||
+      !config.routes.some((r) => r.event.type === eventType)
+    )
+      return bad("Agent 或事件类型未在可信配置中注册");
+    let registered:
+      [string, NonNullable<Config["policyWorkspaces"]>[string]] | undefined;
+    try {
+      const canonical = realpathSync(workspace);
+      registered = Object.entries(config.policyWorkspaces ?? {}).find(
+        ([, w]) => realpathSync(w.path) === canonical,
+      );
+    } catch {
+      return bad("工作目录不存在");
+    }
+    if (!registered) return bad("工作目录未在可信配置中注册");
+    if (get("SELECT id FROM automation_definitions WHERE id=?", id))
+      return conflict();
+    const [workspaceId, ws] = registered;
+    const snapshot = {
+      instruction: b.instruction ?? "",
+      loop: {
+        maxRuns: b.maxRuns ?? 8,
+        maxDurationSeconds: b.maxDurationSeconds ?? 7200,
+      },
+      policy: {
+        effect: "authorize",
+        eventTypes: [eventType],
+        agentProfileId: agent,
+        agentProfileSnapshot: config.agents[agent],
+        workspaceId,
+        workspacePath: ws.path,
+        workspaceAllowedRoot: ws.allowedRoot,
+        allowedCapabilities: ws.allowedCapabilities,
+        requestedCapabilities: ws.allowedCapabilities,
+        requiresApproval: false,
+      },
+    };
+    loopConfig(snapshot);
+    createDefinition(db, id, id, snapshot, now());
+    return automationSummary(id);
+  });
   const conflict = () => {
     throw new TaskCircuitError("conflict", "状态或租约已失效", 409);
   };
@@ -517,6 +742,10 @@ export function createHub(
     })),
   );
   hub.get("/api/health", async () => ({ ok: true, service: "taskcircuit" }));
+  hub.get("/api/diagnostics", async () => ({
+    schema: Number(get("SELECT MAX(version) v FROM schema_migrations")?.v),
+    agentProfiles: Object.keys(config.agents).sort(),
+  }));
   const scheduleWork = (
     workId: string,
     parentId: string,
@@ -700,7 +929,7 @@ export function createHub(
       const fired = tx(() => {
         const exclusions = [...isolated];
         const schedule = get(
-          `SELECT * FROM schedules WHERE status='active' AND next_fire_at<=?${exclusions.length ? ` AND id NOT IN (${exclusions.map(() => "?").join(",")})` : ""} ORDER BY next_fire_at,id LIMIT 1`,
+          `SELECT * FROM schedules WHERE status='active' AND next_fire_at<=? AND (owner_kind<>'work_item' OR NOT EXISTS(SELECT 1 FROM work_items w JOIN automation_roots r ON r.id=w.root_id WHERE w.id=schedules.owner_id AND r.status IN ('blocked','completed','failed','cancelled','expired','budget_exhausted')))${exclusions.length ? ` AND id NOT IN (${exclusions.map(() => "?").join(",")})` : ""} ORDER BY next_fire_at,id LIMIT 1`,
           time,
           ...exclusions,
         );
@@ -792,6 +1021,26 @@ export function createHub(
             }
           }
           if (parent && work && work.status === "waiting_schedule") {
+            const admission = inspectAdmission(
+              db,
+              String(parent.id),
+              config,
+              time,
+              true,
+            );
+            if (
+              admission.status === "denied" &&
+              ["loop_max_runs_reached", "loop_deadline_reached"].includes(
+                admission.reason,
+              )
+            ) {
+              const r = get(
+                "SELECT root_id FROM work_items WHERE id=?",
+                String(work.id),
+              );
+              terminateForLimit(db, String(r?.root_id), admission.reason, time);
+              return true;
+            }
             const executionId = randomUUID();
             const retry = schedule.reason === "retry";
             run(
@@ -857,11 +1106,31 @@ export function createHub(
   };
   Object.assign(hub, { tickScheduler });
   let timer: ReturnType<typeof setInterval> | undefined;
+  const processDecisions = () => {
+    try {
+      processPendingDecisions(db, { config, now: clockNow });
+      processPendingMaterializations(db, config, clockNow, 100, (id, code) =>
+        hub.log.warn(
+          { decisionId: id, code },
+          "decision materialization deferred",
+        ),
+      );
+      tx(() => {
+        const time = now();
+        expireQueuedAutomations(db, time);
+        recoverContinuations(db, config, time);
+      });
+    } catch {
+      hub.log.error("decision recovery failed");
+    }
+  };
   hub.addHook("onReady", async () => {
+    processDecisions();
     if (pollIntervalMs > 0) {
       timer = setInterval(() => {
         try {
           tickScheduler();
+          processDecisions();
         } catch {
           hub.log.error("scheduler tick failed");
         }
@@ -888,7 +1157,7 @@ export function createHub(
       workId = randomUUID(),
       executionId = randomUUID();
     run(
-      "INSERT INTO events VALUES(?,?,?,?,?)",
+      "INSERT INTO events(id,source,type,payload,created_at) VALUES(?,?,?,?,?)",
       eventId,
       b.source as string,
       b.type as string,
@@ -910,8 +1179,15 @@ export function createHub(
           : {}),
       }),
     );
+    const rootId = randomUUID();
     run(
-      "INSERT INTO work_items VALUES(?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO automation_roots(id,definition_id,definition_version,mode,status,created_at,updated_at) VALUES(?,'system/manual',1,'manual','active',?,?)",
+      rootId,
+      time,
+      time,
+    );
+    run(
+      "INSERT INTO work_items(id,title,status,route_id,agent_profile_id,created_at,updated_at,completed_at,metadata,root_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
       workId,
       route.title,
       "active",
@@ -929,6 +1205,7 @@ export function createHub(
           Object.keys(config.channels ?? { local: { type: "local-console" } }),
         notifyOnCompleted: route.notifyOnCompleted ?? false,
       }),
+      rootId,
     );
     run(
       "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,not_before,input,created_at) VALUES(?,?,?,?,?,?,?,?)",
@@ -947,6 +1224,153 @@ export function createHub(
       execution: shape(get("SELECT * FROM executions WHERE id=?", executionId)),
     };
   };
+  hub.post("/api/events/v2", { bodyLimit: 131072 }, async (req, reply) => {
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip))
+      throw new TaskCircuitError(
+        "event_source_invalid",
+        "事件入口仅接受本机连接",
+        403,
+      );
+    const b = req.body;
+    if (!object(b))
+      throw new TaskCircuitError("event_invalid", "事件格式不正确", 400);
+    const result = ingestEvent(
+      db,
+      { sourceInstance: "local-cli", trustContext: "trusted_local_cli" },
+      b as unknown as EventEnvelope,
+      {
+        knownTypes: new Set(config.routes.map((r) => r.event.type)),
+        now: clockNow,
+      },
+    );
+    if (result.status === "conflict")
+      return reply.code(409).send({
+        error: {
+          code: "event_delivery_conflict",
+          message: "事件投递标识与已有内容不一致",
+        },
+        eventId: result.eventId,
+      });
+    processDecisions();
+    return result;
+  });
+  hub.post<{ Params: { id: string } }>(
+    "/api/events/:id/decide",
+    async (req) => {
+      if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip))
+        throw new TaskCircuitError(
+          "decision_source_invalid",
+          "决策入口仅接受本机连接",
+          403,
+        );
+      const b = req.body;
+      if (
+        !object(b) ||
+        Object.keys(b).some(
+          (k) =>
+            ![
+              "requestId",
+              "rootId",
+              "generation",
+              "expectedRootVersion",
+            ].includes(k),
+        ) ||
+        typeof b.requestId !== "string" ||
+        b.requestId.startsWith("auto:") ||
+        typeof b.rootId !== "string"
+      )
+        throw new TaskCircuitError("decision_invalid", "决策请求不正确", 400);
+      return evaluateDecision(
+        db,
+        {
+          requestId: b.requestId,
+          eventId: req.params.id,
+          rootId: b.rootId,
+          generation: (b.generation ?? 1) as number,
+          expectedRootVersion: b.expectedRootVersion as number | undefined,
+        },
+        { config, now: clockNow },
+      );
+    },
+  );
+  hub.post<{ Params: { id: string } }>(
+    "/api/decisions/:id/materialize",
+    async (req) => {
+      if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip))
+        throw new TaskCircuitError(
+          "decision_source_invalid",
+          "仅接受本机连接",
+          403,
+        );
+      return materializeDecision(db, req.params.id, config, clockNow);
+    },
+  );
+  hub.get<{ Params: { id: string } }>(
+    "/api/decisions/:id",
+    async (req) => getDecision(db, req.params.id) ?? missing(),
+  );
+  hub.get<{ Params: { id: string }; Querystring: { after?: string } }>(
+    "/api/roots/:id/decisions",
+    async (req) => {
+      const after = Number(req.query.after ?? 0);
+      if (!Number.isSafeInteger(after) || after < 0)
+        throw new TaskCircuitError("decision_invalid", "分页参数不正确", 400);
+      return listRootDecisions(db, req.params.id, after);
+    },
+  );
+  hub.get("/api/events/v2", async () =>
+    all(
+      "SELECT e.id,e.source,e.type,e.received_at,e.source_instance,e.trust_context,d.status FROM events e JOIN event_deliveries d ON d.event_id=e.id WHERE e.schema_version=1 ORDER BY e.received_at DESC,e.id DESC LIMIT 100",
+    ).map(shape),
+  );
+  const eventDetails = (id: string, currentOnly: boolean) => {
+    const e = get(
+      currentOnly
+        ? "SELECT * FROM events WHERE id=? AND schema_version=1"
+        : "SELECT * FROM events WHERE id=?",
+      id,
+    );
+    if (!e) return missing();
+    const d = get(
+      "SELECT source_instance,source_event_id,status,received_at FROM event_deliveries WHERE event_id=?",
+      id,
+    );
+    const links = all(
+      "SELECT l.root_id,l.relationship,l.sequence,r.predecessor_root_id FROM event_root_links l JOIN automation_roots r ON r.id=l.root_id WHERE l.event_id=? ORDER BY l.sequence",
+      id,
+    );
+    const history = all(
+      "SELECT h.sequence,h.state,h.recorded_at FROM event_delivery_history h JOIN event_deliveries d ON d.id=h.delivery_id WHERE d.event_id=? ORDER BY h.sequence LIMIT 100",
+      id,
+    );
+    return {
+      event: shape(e),
+      delivery: shape(d),
+      roots: links.map(shape),
+      history: history.map(shape),
+    };
+  };
+  hub.get<{ Params: { id: string } }>("/api/events/:id", async (req) =>
+    eventDetails(req.params.id, false),
+  );
+  hub.get<{ Params: { id: string } }>("/api/events/v2/:id", async (req) =>
+    eventDetails(req.params.id, true),
+  );
+  hub.get<{ Params: { id: string }; Querystring: { after?: string } }>(
+    "/api/roots/:id/events",
+    async (req) => {
+      if (!get("SELECT id FROM automation_roots WHERE id=?", req.params.id))
+        return missing();
+      const cursor = req.query.after ?? "0";
+      if (!/^\d+$/.test(cursor) || !Number.isSafeInteger(Number(cursor)))
+        return bad("事件游标不正确");
+      return all(
+        "SELECT e.id,e.source,e.type,e.received_at,e.occurred_at,e.source_instance,e.trust_context,l.sequence,l.relationship FROM event_root_links l JOIN events e ON e.id=l.event_id WHERE l.root_id=? AND l.sequence>? ORDER BY l.sequence LIMIT 100",
+        req.params.id,
+        Number(cursor),
+      ).map(shape);
+    },
+  );
   hub.post("/api/events", async (req) => {
     const b = req.body;
     if (!object(b) || !str(b.source) || !str(b.type) || !object(b.payload))
@@ -978,6 +1402,13 @@ export function createHub(
         const q = get("SELECT * FROM interactions WHERE id=?", req.params.id);
         if (!q) return missing();
         if (q.status !== "open") return conflict();
+        if (
+          !get(
+            "SELECT 1 FROM work_items w JOIN automation_roots r ON r.id=w.root_id WHERE w.id=? AND r.status IN ('active','waiting')",
+            String(q.work_item_id),
+          )
+        )
+          return conflict();
         const request = JSON.parse(String(q.request)) as Row;
         if (
           Array.isArray(request.options) &&
@@ -997,6 +1428,26 @@ export function createHub(
           String(q.id),
         );
         resolveNotifications("interaction_id", String(q.id), time);
+        const admission = inspectAdmission(
+          db,
+          String(e.id),
+          config,
+          time,
+          true,
+        );
+        if (
+          admission.status === "denied" &&
+          ["loop_max_runs_reached", "loop_deadline_reached"].includes(
+            admission.reason,
+          )
+        ) {
+          const r = get(
+            "SELECT root_id FROM work_items WHERE id=?",
+            String(q.work_item_id),
+          );
+          terminateForLimit(db, String(r?.root_id), admission.reason, time);
+          return { ok: true, admission: admission.reason };
+        }
         run(
           "INSERT INTO executions(id,work_item_id,sequence,status,agent_profile_id,agent_session_id,not_before,input,created_at,trigger_kind,parent_execution_id,retry_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
           randomUUID(),
@@ -1066,11 +1517,36 @@ export function createHub(
     const result = tx(() => {
       expireExecutions();
       const time = now();
-      const e = get(
-        "SELECT * FROM executions WHERE status='queued' AND not_before<=? ORDER BY created_at,sequence LIMIT 1",
-        time,
-      );
-      if (!e) return null;
+      recoverContinuations(db, config, time);
+      let e = get(claimCandidateSql, time);
+      let admission = e
+        ? inspectAdmission(db, String(e.id), config, time)
+        : undefined;
+      while (e && admission && admission.status === "denied") {
+        const root = get(
+          "SELECT r.id,r.mode FROM automation_roots r JOIN work_items w ON w.root_id=r.id WHERE w.id=?",
+          String(e.work_item_id),
+        );
+        if (root?.mode !== "automation") return null;
+        if (
+          ["loop_max_runs_reached", "loop_deadline_reached"].includes(
+            admission.reason,
+          )
+        )
+          terminateForLimit(db, String(root.id), admission.reason, time);
+        else
+          run(
+            "UPDATE automation_roots SET status='blocked',terminal_reason=?,updated_at=?,version=version+1 WHERE id=? AND status IN ('active','waiting')",
+            admission.reason,
+            time,
+            String(root.id),
+          );
+        e = get(claimCandidateSql, time);
+        admission = e
+          ? inspectAdmission(db, String(e.id), config, time)
+          : undefined;
+      }
+      if (!e || !admission || admission.status !== "admitted") return null;
       const token = randomUUID();
       run(
         "UPDATE executions SET status='running',claimed_by=?,lease_token=?,lease_expires_at=?,started_at=COALESCE(started_at,?) WHERE id=?",
@@ -1093,6 +1569,15 @@ export function createHub(
             )
           : null,
         leaseToken: token,
+        ...(admission.workspace
+          ? {
+              automationWorkspace: admission.workspace,
+              automationRemainingMs: Math.max(
+                0,
+                Date.parse(String(admission.deadlineAt)) - Date.parse(time),
+              ),
+            }
+          : {}),
         agentProfile: shape(
           get(
             "SELECT * FROM agent_profiles WHERE id=?",
@@ -1124,6 +1609,82 @@ export function createHub(
       String(b.leaseToken),
       now(),
     );
+  hub.post<{ Params: { id: string } }>(
+    "/api/executions/:id/authorize-start",
+    async (req) => {
+      const b = req.body;
+      if (!object(b) || !str(b.workerId) || !str(b.leaseToken))
+        return bad("启动参数不正确");
+      return tx(() => {
+        const e = valid(req.params.id, b);
+        if (!e) return conflict();
+        const r = get(
+          "SELECT r.id,r.mode,r.deadline_at FROM automation_roots r JOIN work_items w ON w.root_id=r.id WHERE w.id=?",
+          String(e.work_item_id),
+        );
+        if (r?.mode !== "automation") return { status: "admitted" };
+        const time = now();
+        const admission = inspectAdmission(
+          db,
+          req.params.id,
+          config,
+          time,
+          false,
+          true,
+        );
+        if (b.abandon === true) {
+          run(
+            "UPDATE executions SET status='cancelled',finished_at=?,lease_token=NULL WHERE id=?",
+            time,
+            req.params.id,
+          );
+          if (time >= String(r.deadline_at))
+            terminateForLimit(db, String(r.id), "loop_deadline_reached", time);
+          else
+            run(
+              "UPDATE automation_roots SET status='blocked',terminal_reason='deadline_uncertain',updated_at=?,version=version+1 WHERE id=? AND status IN ('active','waiting')",
+              time,
+              String(r.id),
+            );
+          return {
+            status: "denied",
+            reason:
+              time >= String(r.deadline_at)
+                ? "loop_deadline_reached"
+                : "deadline_uncertain",
+          };
+        }
+        if (admission.status !== "admitted") {
+          run(
+            "UPDATE executions SET status='cancelled',finished_at=?,lease_token=NULL WHERE id=?",
+            time,
+            req.params.id,
+          );
+          if (
+            ["loop_deadline_reached", "loop_max_runs_reached"].includes(
+              admission.reason,
+            )
+          )
+            terminateForLimit(db, String(r.id), admission.reason, time);
+          else
+            run(
+              "UPDATE automation_roots SET status='blocked',terminal_reason=?,updated_at=?,version=version+1 WHERE id=? AND status IN ('active','waiting')",
+              admission.reason,
+              time,
+              String(r.id),
+            );
+          return { status: "denied", reason: admission.reason };
+        }
+        return {
+          status: "admitted",
+          remainingMs: Math.max(
+            0,
+            Date.parse(String(r.deadline_at)) - Date.parse(time),
+          ),
+        };
+      });
+    },
+  );
   hub.post<{ Params: { id: string } }>(
     "/api/executions/:id/heartbeat",
     async (req) => {
@@ -1220,9 +1781,14 @@ export function createHub(
         };
       }
       if (
-        !["completed", "needs_input", "failed", "later"].includes(
-          String(result.type),
-        )
+        ![
+          "completed",
+          "needs_input",
+          "failed",
+          "later",
+          "continue",
+          "stop",
+        ].includes(String(result.type))
       )
         return bad("结果类型不正确");
       if (
@@ -1242,6 +1808,15 @@ export function createHub(
         (!str(result.sessionId) || typeof result.output !== "string")
       )
         return bad("完成结果不正确");
+      if (
+        (result.type === "continue" || result.type === "stop") &&
+        (!str(result.sessionId) ||
+          !str(result.message) ||
+          Object.keys(result).some(
+            (k) => !["type", "sessionId", "message"].includes(k),
+          ))
+      )
+        return bad("反馈格式不正确");
       if (
         result.type === "later" &&
         (!str(result.sessionId) ||
@@ -1318,7 +1893,21 @@ export function createHub(
             "{}",
           );
         }
-        if (result.type === "later") {
+        if (result.type === "continue" || result.type === "stop") {
+          run(
+            "UPDATE executions SET status='completed',agent_session_id=?,output=?,finished_at=?,lease_token=NULL WHERE id=?",
+            sid,
+            json({ feedback: result.type, message: result.message }),
+            time,
+            String(e.id),
+          );
+          run(
+            "UPDATE work_items SET status=?,updated_at=? WHERE id=?",
+            result.type === "continue" ? "waiting_schedule" : "cancelled",
+            time,
+            String(e.work_item_id),
+          );
+        } else if (result.type === "later") {
           const due =
             result.runAt !== undefined
               ? new Date(String(result.runAt)).toISOString()

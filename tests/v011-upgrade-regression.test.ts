@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 import { resultDigest } from "../src/result-receipt.js";
 import { formatWorkItem } from "../src/cli-format.js";
@@ -58,6 +58,14 @@ function setup(kind: "empty" | "history") {
     saved[kind].sha256,
   );
   writeFileSync(path, raw);
+  const historical = new DatabaseSync(path, { readOnly: true });
+  try {
+    expect(
+      historical.prepare("SELECT COUNT(*) n FROM schema_migrations").get()?.n,
+    ).toBe(4);
+  } finally {
+    historical.close();
+  }
   let now = saved.clock;
   let hub = createHub(path, defaultConfig, () => now, 0, {
     dispatcherPollMs: 0,
@@ -107,7 +115,7 @@ describe("genuine v0.1.1 database compatibility", () => {
       expect((await f.hub.inject("/api/health")).statusCode).toBe(200);
       expect(
         await dbCount(f.path, "SELECT COUNT(*) AS n FROM schema_migrations"),
-      ).toBe(4);
+      ).toBe(10);
       expect(
         await dbCount(f.path, "SELECT COUNT(*) AS n FROM work_items"),
       ).toBe(0);
@@ -589,7 +597,7 @@ describe("genuine v0.1.1 database compatibility", () => {
       ).toHaveLength(1);
       expect(
         await dbCount(f.path, "SELECT COUNT(*) AS n FROM schema_migrations"),
-      ).toBe(4);
+      ).toBe(10);
     } finally {
       if (child && child.exitCode === null && child.signalCode === null) {
         await new Promise<void>((resolve) => {

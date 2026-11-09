@@ -40,6 +40,28 @@ CREATE TRIGGER changes_schedule_fired AFTER INSERT ON schedule_firings BEGIN INS
 `;
 const fourth = `CREATE TABLE worker_presence(id TEXT PRIMARY KEY,status TEXT NOT NULL,last_seen_at TEXT NOT NULL);`;
 export function migrate(db: DatabaseSync): void {
+  const existing = db
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type='table' AND name='schema_migrations'",
+    )
+    .get();
+  if (
+    existing &&
+    Number(
+      db
+        .prepare(
+          "SELECT COALESCE(MAX(version),0) AS version FROM schema_migrations",
+        )
+        .get()!.version,
+    ) > 10
+  ) {
+    throw Object.assign(
+      new Error(
+        "Database schema is newer than this TaskCircuit binary supports. Upgrade TaskCircuit before opening this database.",
+      ),
+      { code: "database_schema_too_new" },
+    );
+  }
   db.exec(
     "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
   );

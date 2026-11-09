@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 import { workOnce } from "../src/worker.js";
 import type { AgentAdapter } from "../src/adapter.js";
@@ -66,6 +66,11 @@ async function setup() {
 }
 const resultCases = [
   [
+    "continue",
+    { type: "continue", sessionId: "private-session", message: "next" },
+  ],
+  ["stop", { type: "stop", sessionId: "private-session", message: "stop" }],
+  [
     "complete",
     { type: "completed", sessionId: "private-session", output: "ok" },
   ],
@@ -116,7 +121,7 @@ describe("result submission receipt", () => {
   it("preserves legacy submission and duplicate conflict behavior without creating a receipt", async () => {
     const f = await setup();
     try {
-      const result = resultCases[0][1];
+      const result = resultCases[2][1];
       const payload = { workerId: "w", leaseToken: f.claim.leaseToken, result };
       const url = `/api/executions/${f.claim.execution.id}/result`;
       const first = await post(f.hub, url, payload);
@@ -171,6 +176,18 @@ describe("result submission receipt", () => {
         const afterRestart = await post(f.hub, url, body);
         expect(afterRestart.statusCode).toBe(200);
         expect(afterRestart.json().status).toBe("already_committed");
+        if (_kind === "continue") {
+          const state = (
+            await f.hub.inject(`/api/work-items/${f.created.workItem.id}`)
+          ).json();
+          expect(state.workItem.status).toBe("waiting_schedule");
+          expect(state.executions[0].output).toEqual({
+            feedback: "continue",
+            message: "next",
+          });
+          expect(state.agentSession.externalSessionId).toBe("private-session");
+          expect(state.executions).toHaveLength(1);
+        }
         if (_kind === "ask") {
           const item = (
             await f.hub.inject(`/api/work-items/${f.created.workItem.id}`)
@@ -201,7 +218,7 @@ describe("result submission receipt", () => {
             db.close();
           }
         }
-        if (_kind !== "complete") {
+        if (_kind === "ask" || _kind === "later" || _kind === "retry") {
           const resumed = (
             await post(f.hub, "/api/executions/claim", { workerId: "next" })
           ).json();
@@ -248,13 +265,13 @@ describe("result submission receipt", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const f = await setup();
     try {
-      const a = identity(f.claim, resultCases[0][1]);
+      const a = identity(f.claim, resultCases[2][1]);
       const url = `/api/executions/${f.claim.execution.id}/result`;
       expect((await post(f.hub, url, a)).statusCode).toBe(200);
       const before = (
         await f.hub.inject(`/api/work-items/${f.created.workItem.id}`)
       ).json();
-      const changed = { ...resultCases[0][1], output: "different" };
+      const changed = { ...resultCases[2][1], output: "different" };
       expect(
         (await post(f.hub, url, { ...a, result: changed })).statusCode,
       ).toBe(409);
@@ -290,7 +307,7 @@ describe("result submission receipt", () => {
   it("rejects a stale new result but lets a stale sender query the accepted receipt", async () => {
     const a = await setup();
     try {
-      const valid = identity(a.claim, resultCases[0][1]);
+      const valid = identity(a.claim, resultCases[2][1]);
       expect(
         (
           await post(
@@ -308,7 +325,7 @@ describe("result submission receipt", () => {
       );
       expect(replay.statusCode).toBe(200);
       expect(replay.json().status).toBe("already_committed");
-      const fresh = identity(a.claim, resultCases[0][1]);
+      const fresh = identity(a.claim, resultCases[2][1]);
       expect(
         (
           await post(
@@ -324,7 +341,7 @@ describe("result submission receipt", () => {
     const b = await setup();
     try {
       b.advance(31000);
-      const fresh = identity(b.claim, resultCases[0][1]);
+      const fresh = identity(b.claim, resultCases[2][1]);
       expect(
         (
           await post(

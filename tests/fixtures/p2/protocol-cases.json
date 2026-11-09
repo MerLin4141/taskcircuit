@@ -9,7 +9,11 @@
     "missing_message": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"turn.completed\"}\n",
     "mismatch": "{\"type\":\"thread.started\",\"thread_id\":\"other-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}}\n",
     "ask": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"ask\\\",\\\"message\\\":\\\"input\\\",\\\"interaction\\\":{\\\"title\\\":\\\"choose\\\",\\\"text\\\":\\\"choose\\\",\\\"key\\\":\\\"choice\\\",\\\"options\\\":[\\\"yes\\\"]}}\"}}\n{\"type\":\"turn.completed\"}\n",
-    "fail": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"fail\\\",\\\"message\\\":\\\"error\\\",\\\"retryable\\\":true}\"}}\n{\"type\":\"turn.completed\"}\n"
+    "fail": "{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"kind\\\":\\\"fail\\\",\\\"message\\\":\\\"error\\\",\\\"retryable\\\":true}\"}}\n{\"type\":\"turn.completed\"}\n",
+    "continue": "{\"type\": \"thread.started\", \"thread_id\": \"fake-session\"}\n{\"type\": \"item.completed\", \"item\": {\"type\": \"agent_message\", \"text\": \"{\\\"kind\\\":\\\"continue\\\",\\\"message\\\":\\\"fixture feedback\\\"}\"}}\n",
+    "stop": "{\"type\": \"thread.started\", \"thread_id\": \"fake-session\"}\n{\"type\": \"item.completed\", \"item\": {\"type\": \"agent_message\", \"text\": \"{\\\"kind\\\":\\\"stop\\\",\\\"message\\\":\\\"fixture feedback\\\"}\"}}\n",
+    "invalid-feedback": "{\"type\": \"thread.started\", \"thread_id\": \"fake-session\"}\n{\"type\": \"item.completed\", \"item\": {\"type\": \"agent_message\", \"text\": \"{\\\"kind\\\":\\\"continue\\\",\\\"message\\\":\\\"\\\"}\"}}\n",
+    "later": "{\"type\": \"thread.started\", \"thread_id\": \"fake-session\"}\n{\"type\": \"item.completed\", \"item\": {\"type\": \"agent_message\", \"text\": \"{\\\"kind\\\":\\\"later\\\",\\\"message\\\":\\\"fixture later\\\",\\\"afterSeconds\\\":2}\"}}\n"
   },
   "claude": {
     "valid": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}",
@@ -22,7 +26,11 @@
     "mismatch": "{\"session_id\": \"other-session\", \"result\": \"{\\\"kind\\\":\\\"complete\\\",\\\"message\\\":\\\"fixture done\\\"}\"}",
     "is_error": "{\"is_error\": true, \"session_id\": \"fake-session\", \"result\": \"error\"}",
     "ask": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"ask\\\",\\\"message\\\":\\\"input\\\",\\\"interaction\\\":{\\\"title\\\":\\\"choose\\\",\\\"text\\\":\\\"choose\\\",\\\"key\\\":\\\"choice\\\",\\\"options\\\":[\\\"yes\\\"]}}\"}",
-    "fail": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"fail\\\",\\\"message\\\":\\\"error\\\",\\\"retryable\\\":true}\"}"
+    "fail": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"fail\\\",\\\"message\\\":\\\"error\\\",\\\"retryable\\\":true}\"}",
+    "continue": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"continue\\\",\\\"message\\\":\\\"fixture feedback\\\"}\"}",
+    "stop": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"stop\\\",\\\"message\\\":\\\"fixture feedback\\\"}\"}",
+    "invalid-feedback": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"continue\\\",\\\"message\\\":\\\"\\\"}\"}",
+    "later": "{\"session_id\": \"fake-session\", \"result\": \"{\\\"kind\\\":\\\"later\\\",\\\"message\\\":\\\"fixture later\\\",\\\"afterSeconds\\\":2}\"}"
   },
   "errors": {
     "rate": "HTTP 429 too many requests",

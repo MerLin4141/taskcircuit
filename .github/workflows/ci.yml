@@ -35,4 +35,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run format:check
       - run: npm test
+      - run: npm run build
       - run: npm audit

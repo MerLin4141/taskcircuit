@@ -85,6 +85,50 @@ describe("P2 fake CLI process protocol", () => {
         sessionId: "fake-session",
       });
     });
+    it.each(["continue", "stop"])(
+      `${kind} maps fake %s feedback without losing the session`,
+      async (scenario) => {
+        expect(await adapter(kind, scenario).execute(input)).toEqual({
+          type: scenario,
+          sessionId: "fake-session",
+          message: "fixture feedback",
+        });
+      },
+    );
+    it(`${kind} fake session can report Continue twice then Complete`, async () => {
+      const first = await adapter(kind, "continue").execute(input);
+      const second = await adapter(kind, "continue").execute({
+        ...input,
+        externalSessionId: "fake-session",
+      });
+      const third = await adapter(kind, "valid").execute({
+        ...input,
+        externalSessionId: "fake-session",
+      });
+      expect([first.type, second.type, third.type]).toEqual([
+        "continue",
+        "continue",
+        "completed",
+      ]);
+      expect([first.sessionId, second.sessionId, third.sessionId]).toEqual([
+        "fake-session",
+        "fake-session",
+        "fake-session",
+      ]);
+    });
+    it(`${kind} maps Later while preserving the session`, async () => {
+      expect(await adapter(kind, "later").execute(input)).toEqual({
+        type: "later",
+        sessionId: "fake-session",
+        message: "fixture later",
+        afterSeconds: 2,
+      });
+    });
+    it(`${kind} rejects malformed feedback`, async () => {
+      await expect(
+        adapter(kind, "invalid-feedback").execute(input),
+      ).rejects.toMatchObject({ code: "agent_protocol", outcomeUnknown: true });
+    });
     it(`${kind} preserves reported-failure cause as an unknown outcome`, async () => {
       expect(await adapter(kind, "fail").execute(input)).toMatchObject({
         type: "failed",

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 import { MockAgentAdapter } from "../src/adapter.js";
 import { workOnce } from "../src/worker.js";
@@ -206,7 +206,7 @@ describe("TaskCircuit runtime", () => {
     ])
       expect(
         Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n),
-      ).toBe(table === "schema_migrations" ? 4 : 1);
+      ).toBe(table === "schema_migrations" ? 10 : 1);
     expect(created.workItem.id).toBeTruthy();
     db.close();
     rmSync(dir, { recursive: true, force: true });

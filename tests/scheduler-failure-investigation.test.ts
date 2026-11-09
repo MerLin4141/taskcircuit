@@ -5,7 +5,7 @@ import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 
 const baseTime = Date.parse("2026-11-08T00:00:00Z");

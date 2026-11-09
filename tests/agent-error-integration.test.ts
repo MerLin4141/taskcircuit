@@ -1,6 +1,6 @@
 // Guards the complete adapter-to-worker-to-scheduler error and notification path.
 import { describe, expect, it } from "vitest";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 import { workOnce } from "../src/worker.js";
 import { CodexAdapter } from "../src/agents/codex/adapter.js";

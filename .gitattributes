@@ -8,3 +8,5 @@
 *.zip binary
 *.db binary
 *.sqlite binary
+
+tests/fixtures/v012-runtime/** -text

@@ -92,6 +92,12 @@ export class ClaudeAdapter implements AgentAdapter {
         true,
       );
     }
+    if (parsed.kind === "continue" || parsed.kind === "stop")
+      return {
+        type: parsed.kind,
+        sessionId: value.session_id as string,
+        message: parsed.message,
+      };
     if (parsed.kind === "later")
       return {
         type: "later",

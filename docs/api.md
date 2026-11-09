@@ -22,3 +22,14 @@ Execution 的 `error` 可包含 `code`、`message` 和 `retryable`；错误类�
 回执与执行更新同一 SQLite 写事务提交，存放于对应 Work Item 的 `metadata.taskcircuitResultReceiptsV1`，每个 Execution 至多一条；因此进程重启仍可确认，无需 Migration 5。现有记录不被补造回执；旧版本不认识该附加字段，保持原有数据和请求语义。回执随工作项长期保存，工作项执行次数较多时 metadata 会增长；将来若需要独立索引、清理策略或更严格的跨版本约束，应单独评估迁移。该接口沿用 Trusted Local 模型，没有新增跨用户访问控制。
 
 Worker 对一次逻辑结果只生成一次提交 ID；响应丢失后先查询回执，确认未提交且租约仍在保守有效期内才以相同 ID 和摘要重试。查询及重试有界；失权后只查询、不再重提。确认不了时保留不确定状态，不重新运行 Agent。结果回执只确认 Hub 的 SQLite 提交，不提供外部 API 恰好一次保证。
+
+## v0.2 preview: Automation and Root
+
+The following additive endpoints use the existing Trusted Local boundary. They do not add authentication or a security sandbox.
+
+- `POST /api/automations`: create an Automation with `id`, `eventType`, `agent`, `workspace`, and optional `instruction`, `maxRuns`, `maxDurationSeconds`. Defaults are 8 runs and 7200 seconds. The event type, agent profile, and workspace must already be registered in the Hub's trusted local configuration; the request cannot grant a new workspace or agent permission.
+- `GET /api/automations` and `GET /api/automations/:id`: list and inspect current definitions.
+- `GET /api/roots` and `GET /api/roots/:id`: inspect a bounded Root summary without lease tokens, external session IDs, or receipt identities.
+- `GET /api/diagnostics`: report the active schema version and registered agent profile names.
+
+For the CLI preview and mock demo, see [Quick start](quickstart-v0.2.md).

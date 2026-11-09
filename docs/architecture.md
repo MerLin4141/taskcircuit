@@ -1,5 +1,19 @@
-# 架构与信任边界
+# Architecture and trust boundary
 
-Control Plane 包括 CLI、Hub、Scheduler、NotificationDispatcher 和 SQLite；执行 Worker 经 HTTP 获取任务并调用 Agent Adapter。Windows Startup Task 启动 Job Object 持有进程和 Runtime Launcher，后者监督 Hub 与 Worker，并在异常退出时关闭另一组件。
+## User-facing model
 
-Job Object 用于进程树生命周期，不是 OS 安全隔离。当前仍为 trusted-local：Agent 与 Worker 使用同一操作系统用户，不声称阻止 Agent 自行访问其他文件。Hub 默认仅监听回环地址。详见 [windows-runtime.md](windows-runtime.md)、[security-model.md](security-model.md) 和 [scheduling.md](scheduling.md)。
+An Event selects an Automation and starts or correlates with a Root. An Agent produces Complete, Continue, NeedsInput, Later, Failed or Stop feedback. A Root can span multiple Executions; human answers and scheduled work resume the same Agent Session when available.
+
+## Internal runtime
+
+```text
+Event → Automation Root → Decision → Work Item → Execution → Worker → Agent
+                                                        ↑                │
+                                                        └─ Admission ← Feedback
+```
+
+Hub persists state in SQLite, checks trusted policy snapshots, materializes decisions, admits work, schedules later/retry, records result receipts and provides a change stream. Before continuation, admission checks Root state, authorization, concurrency, max runs and deadline. Definition versions and decisions are immutable. A receipt confirms Hub commit, not an external action.
+
+Windows Task Scheduler starts the Runtime Launcher, which supervises Hub and Worker using a Job Object. Job Objects manage process lifetime; they do not provide security isolation. Hub listens on loopback by default; loopback is not authentication. Capability metadata is an application authorization decision, not an OS-level filesystem or network sandbox. TaskCircuit uses Trusted Local and cannot guarantee exactly-once external side effects.
+
+See [upgrade](upgrade-v0.2.md), [security model](security-model.md), [Windows runtime](windows-runtime.md), and [API](api.md).

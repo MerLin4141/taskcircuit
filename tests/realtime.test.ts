@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig } from "../src/config.js";
 const post = (h: ReturnType<typeof createHub>, url: string, payload: unknown) =>
   h.inject({ method: "POST", url, payload });
@@ -15,7 +15,7 @@ async function ask(h: ReturnType<typeof createHub>) {
   const c = (await post(h, "/api/executions/claim", { workerId: "w" })).json();
   const result = {
     type: "needs_input",
-    sessionId: "secret-external",
+    sessionId: `secret-external-${work.id}`,
     request: {
       title: "选颜色",
       text: "请选择",
@@ -339,7 +339,7 @@ describe("durable observation and inbox", () => {
       h = createHub(path, defaultConfig, undefined, 0, { dispatcherPollMs: 0 });
       const d = await details(h, w.id);
       expect(d.workItem.status).toBe("waiting_input");
-      expect(d.agentSession.externalSessionId).toBe("secret-external");
+      expect(d.agentSession.externalSessionId).toBe(`secret-external-${w.id}`);
       expect(d.interactions[0].status).toBe("open");
       expect((await h.inject("/api/schedules")).json()).toHaveLength(1);
     } finally {

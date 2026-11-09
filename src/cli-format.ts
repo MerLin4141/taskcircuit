@@ -11,6 +11,25 @@ const text = (value: unknown): string =>
     : typeof value === "string"
       ? value
       : JSON.stringify(value);
+export function formatWatchChange(
+  type: string,
+  payload: { status?: string } = {},
+): string {
+  const labels: Record<string, string> = {
+    "work_item.created": "工作已创建",
+    "execution.created": "执行已排队",
+    "execution.started": "执行已领取",
+    "execution.completed": "一次执行已结束",
+    "execution.waiting_input": "等待人工回答",
+    "interaction.opened": "需要人工回答",
+    "interaction.resolved": "已收到回答",
+  };
+  const label =
+    type === "work_item.status_changed" && payload.status === "completed"
+      ? "工作已完成"
+      : labels[type];
+  return `${label ? `${label} · ` : ""}${type}${payload.status ? ` → ${payload.status}` : ""}`;
+}
 export function formatWorkItemList(value: unknown): string {
   const items = list(value);
   if (!items.length) return "No work items.";

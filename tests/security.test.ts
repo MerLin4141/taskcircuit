@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createHub } from "../src/hub.js";
+import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig, loadConfig } from "../src/config.js";
 import { workOnce } from "../src/worker.js";
 import { agentEnvironment } from "../src/agents/environment.js";

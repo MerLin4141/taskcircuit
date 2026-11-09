@@ -9,6 +9,8 @@ import { join, resolve, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { resultDigest } from "./result-receipt.js";
 interface Claim {
+  automationWorkspace?: string;
+  automationRemainingMs?: number;
   execution: Execution;
   agentSession: AgentSession | null;
   leaseToken: string;
@@ -73,6 +75,8 @@ export async function workOnce(
     workItem,
     event,
     previousInteractions,
+    automationWorkspace,
+    automationRemainingMs,
   } = (await claimed.json()) as Claim;
   const credentials = { workerId, leaseToken };
   const controller = new AbortController();
@@ -174,7 +178,8 @@ export async function workOnce(
           process.env.TASKCIRCUIT_WORKSPACE_ROOT ??
           join(tmpdir(), "taskcircuit-workspaces"),
       );
-      const workingDirectory = join(workspaceRoot, execution.workItemId);
+      const workingDirectory =
+        automationWorkspace ?? join(workspaceRoot, execution.workItemId);
       const fromState = relative(stateRoot, workingDirectory);
       if (
         !fromState ||
@@ -188,10 +193,43 @@ export async function workOnce(
       if (agentProfile.adapter !== "mock")
         mkdirSync(workingDirectory, { recursive: true });
       controller.signal.throwIfAborted();
+      if (automationWorkspace) {
+        const preflightStarted = performance.now();
+        const preflightWallStarted = Date.now();
+        const start = await post(
+          `/api/executions/${execution.id}/authorize-start`,
+          credentials,
+        );
+        if (!start.ok) throw new Error("无法确认启动许可");
+        const authorization = (await start.json()) as {
+          status: string;
+          remainingMs?: number;
+        };
+        if (authorization.status !== "admitted") return true;
+        if (
+          !Number.isFinite(authorization.remainingMs) ||
+          performance.now() - preflightStarted >=
+            Number(authorization.remainingMs) ||
+          Date.now() - preflightWallStarted >=
+            Number(authorization.remainingMs) ||
+          !Number.isFinite(automationRemainingMs) ||
+          performance.now() - claimStarted >= Number(automationRemainingMs)
+        ) {
+          await post(`/api/executions/${execution.id}/authorize-start`, {
+            ...credentials,
+            abandon: true,
+          });
+          return true;
+        }
+      }
+      controller.signal.throwIfAborted();
       result = await chosen.execute(
         {
           workItemId: execution.workItemId,
           executionId: execution.id,
+          ...(agentProfile.adapter === "mock" && event?.type === "demo.loop"
+            ? { executionSequence: execution.sequence }
+            : {}),
           externalSessionId: agentSession?.externalSessionId ?? null,
           workingDirectory,
           instruction: workItem.metadata.instruction ?? "",
