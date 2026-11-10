@@ -1,8 +1,9 @@
+import { validDeclaration, type PluginDeclaration } from "./plugins/loader.js";
 import { readFileSync } from "node:fs";
 import { validPolicy, type RetryPolicy } from "./scheduling.js";
 import { isAbsolute } from "node:path";
 export interface AgentProfile {
-  adapter: "mock" | "codex" | "claude";
+  adapter: string;
   isolation?: "trusted-local" | "sandboxed";
   workspaceRoot?: string;
   model?: string | null;
@@ -29,7 +30,8 @@ export interface Config {
   agents: Record<string, AgentProfile>;
   routes: Route[];
   schedules?: ConfigSchedule[];
-  channels?: Record<string, { type: "local-console" }>;
+  channels?: Record<string, { type: string }>;
+  plugins?: { hub?: PluginDeclaration[]; worker?: PluginDeclaration[] };
   policyWorkspaces?: Record<
     string,
     { path: string; allowedRoot: string; allowedCapabilities: string[] }
@@ -101,11 +103,41 @@ export function loadConfig(path: string): Config {
     !Array.isArray(config.routes)
   )
     throw new Error("配置缺少 agents 或 routes");
+  if (config.plugins !== undefined) {
+    if (
+      !config.plugins ||
+      typeof config.plugins !== "object" ||
+      Array.isArray(config.plugins) ||
+      Object.keys(config.plugins).some((k) => k !== "hub" && k !== "worker")
+    )
+      throw new Error("plugin_config_invalid: 插件配置无效");
+    for (const processKind of ["hub", "worker"] as const) {
+      const entries = config.plugins[processKind];
+      if (
+        entries !== undefined &&
+        (!Array.isArray(entries) ||
+          entries.some((entry) => !validDeclaration(entry, processKind)))
+      )
+        throw new Error("plugin_config_invalid: 插件配置无效");
+    }
+  }
+  const agentIds = new Set([
+    "mock",
+    "codex",
+    "claude",
+    ...(config.plugins?.worker ?? []).map((p) => p.id),
+  ]);
+  const channelIds = new Set([
+    "local-console",
+    ...(config.plugins?.hub ?? [])
+      .filter((p) => p.kind === "channel")
+      .map((p) => p.id),
+  ]);
   for (const [name, agent] of Object.entries(config.agents)) {
     if (
       !name ||
       !agent ||
-      !["mock", "codex", "claude"].includes(agent.adapter) ||
+      !agentIds.has(agent.adapter) ||
       (agent.isolation !== undefined && agent.isolation !== "trusted-local") ||
       (agent.workspaceRoot !== undefined &&
         (typeof agent.workspaceRoot !== "string" ||
@@ -148,7 +180,7 @@ export function loadConfig(path: string): Config {
       typeof config.channels !== "object" ||
       Array.isArray(config.channels) ||
       Object.entries(config.channels).some(
-        ([id, c]) => !id || !c || c.type !== "local-console",
+        ([id, c]) => !id || !c || !channelIds.has(c.type),
       ))
   )
     throw new Error("通知通道配置无效");

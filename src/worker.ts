@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import type { AgentAdapter } from "./adapter.js";
 import { createWorkerPluginRegistry } from "./plugins/builtin/agents.js";
 import type { PluginRegistry } from "./plugins/registry.js";
@@ -14,7 +15,7 @@ interface Claim {
   agentSession: AgentSession | null;
   leaseToken: string;
   agentProfile: {
-    adapter: "mock" | "codex" | "claude";
+    adapter: string;
     model: string | null;
     config: { isolation?: string; workspaceRoot?: string };
   };
@@ -185,7 +186,9 @@ export async function workOnce(
           !isAbsolute(fromState))
       )
         throw new Error("工作目录不能位于状态目录内");
-      plugin.prepareWorkingDirectory?.(workingDirectory);
+      if (plugin.prepareWorkingDirectory)
+        plugin.prepareWorkingDirectory(workingDirectory);
+      else mkdirSync(workingDirectory, { recursive: true });
       controller.signal.throwIfAborted();
       if (automationWorkspace) {
         const preflightStarted = performance.now();
