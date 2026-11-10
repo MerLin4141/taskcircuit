@@ -1,9 +1,8 @@
-import { MockAgentAdapter, type AgentAdapter } from "./adapter.js";
+import type { AgentAdapter } from "./adapter.js";
+import { createWorkerPluginRegistry } from "./plugins/builtin/agents.js";
+import type { PluginRegistry } from "./plugins/registry.js";
 import type { AgentSession, Execution, AgentResult } from "./domain.js";
-import { CodexAdapter } from "./agents/codex/adapter.js";
-import { ClaudeAdapter } from "./agents/claude/adapter.js";
 import { AgentError } from "./agents/errors.js";
-import { mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -47,6 +46,7 @@ export async function workOnce(
   adapter?: AgentAdapter,
   shutdown?: AbortSignal,
   timing = { heartbeatMs: 10000, safetyMs: 26000, requestTimeoutMs: 3000 },
+  registry: PluginRegistry = createWorkerPluginRegistry(),
 ): Promise<boolean> {
   const post = (path: string, payload: unknown) =>
     fetch(new URL(path, base), {
@@ -159,13 +159,8 @@ export async function workOnce(
     log("info", "开始执行", execution.workItemId, execution.id, workerId);
     let result: AgentResult;
     try {
-      const registry: Record<string, () => AgentAdapter> = {
-        mock: () => new MockAgentAdapter(),
-        codex: () => new CodexAdapter(),
-        claude: () => new ClaudeAdapter(),
-      };
-      const chosen = adapter ?? registry[agentProfile.adapter]?.();
-      if (!chosen) throw new Error("不支持的 Agent");
+      const plugin = registry.getAgent(agentProfile.adapter);
+      const chosen = adapter ?? plugin;
       if (
         (agentProfile.config.isolation ?? "trusted-local") !== "trusted-local"
       )
@@ -190,8 +185,7 @@ export async function workOnce(
           !isAbsolute(fromState))
       )
         throw new Error("工作目录不能位于状态目录内");
-      if (agentProfile.adapter !== "mock")
-        mkdirSync(workingDirectory, { recursive: true });
+      plugin.prepareWorkingDirectory?.(workingDirectory);
       controller.signal.throwIfAborted();
       if (automationWorkspace) {
         const preflightStarted = performance.now();
@@ -223,26 +217,27 @@ export async function workOnce(
         }
       }
       controller.signal.throwIfAborted();
+      const executionInput = {
+        workItemId: execution.workItemId,
+        executionId: execution.id,
+        executionSequence: execution.sequence,
+        externalSessionId: agentSession?.externalSessionId ?? null,
+        workingDirectory,
+        instruction: workItem.metadata.instruction ?? "",
+        context: event
+          ? { source: event.source, type: event.type, payload: event.payload }
+          : null,
+        previousAnswers: previousInteractions.map((i) => ({
+          question: i.request,
+          answer: i.response,
+        })),
+        model: agentProfile.model,
+        retryAttempt: execution.retryAttempt,
+      };
       result = await chosen.execute(
-        {
-          workItemId: execution.workItemId,
-          executionId: execution.id,
-          ...(agentProfile.adapter === "mock" && event?.type === "demo.loop"
-            ? { executionSequence: execution.sequence }
-            : {}),
-          externalSessionId: agentSession?.externalSessionId ?? null,
-          workingDirectory,
-          instruction: workItem.metadata.instruction ?? "",
-          context: event
-            ? { source: event.source, type: event.type, payload: event.payload }
-            : null,
-          previousAnswers: previousInteractions.map((i) => ({
-            question: i.request,
-            answer: i.response,
-          })),
-          model: agentProfile.model,
-          retryAttempt: execution.retryAttempt,
-        },
+        adapter && plugin.prepareInput
+          ? plugin.prepareInput(executionInput)
+          : executionInput,
         controller.signal,
       );
     } catch (error) {

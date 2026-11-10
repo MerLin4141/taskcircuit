@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createWorkerPluginRegistry } from "./plugins/builtin/agents.js";
 import { createHub } from "./hub.js";
 import {
   resolveCurrentStore,
@@ -265,8 +266,16 @@ async function main(): Promise<void> {
     });
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+    const registry = createWorkerPluginRegistry();
     if (args.includes("--once")) {
-      await workOnce(base, workerId, undefined, shutdown.signal);
+      await workOnce(
+        base,
+        workerId,
+        undefined,
+        shutdown.signal,
+        undefined,
+        registry,
+      );
       return;
     }
     const presence = async (status: "online" | "stopped") => {
@@ -288,7 +297,14 @@ async function main(): Promise<void> {
       while (!stopping) {
         try {
           if (
-            !(await workOnce(base, workerId, undefined, shutdown.signal)) &&
+            !(await workOnce(
+              base,
+              workerId,
+              undefined,
+              shutdown.signal,
+              undefined,
+              registry,
+            )) &&
             !stopping
           )
             await new Promise((r) => setTimeout(r, 1000));

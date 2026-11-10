@@ -1,3 +1,5 @@
+import type { AgentAdapter, AgentExecutionInput } from "../adapter.js";
+
 export const PLUGIN_API_VERSION = 1 as const;
 
 export type PluginKind = "source" | "agent" | "channel";
@@ -16,8 +18,10 @@ export interface PluginBase {
 export interface SourcePlugin extends PluginBase {
   readonly manifest: PluginManifest & { kind: "source" };
 }
-export interface AgentPlugin extends PluginBase {
+export interface AgentPlugin extends PluginBase, AgentAdapter {
   readonly manifest: PluginManifest & { kind: "agent" };
+  prepareWorkingDirectory?(path: string): void;
+  prepareInput?(input: AgentExecutionInput): AgentExecutionInput;
 }
 export interface ChannelPlugin extends PluginBase {
   readonly manifest: PluginManifest & { kind: "channel" };
