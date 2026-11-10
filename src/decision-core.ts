@@ -168,7 +168,7 @@ function findInput(
 ): Row | undefined {
   return db
     .prepare(
-      `SELECT e.id event_id,e.type event_type,e.schema_version,r.id root_id,r.status root_status,r.version root_revision,r.definition_id,r.definition_version,d.status definition_status,v.config_snapshot_json FROM event_root_links l JOIN events e ON e.id=l.event_id JOIN automation_roots r ON r.id=l.root_id JOIN automation_definitions d ON d.id=r.definition_id JOIN automation_definition_versions v ON v.definition_id=r.definition_id AND v.version=r.definition_version WHERE l.event_id=? AND l.root_id=? AND e.schema_version=1`,
+      `SELECT e.id event_id,e.type event_type,e.schema_version,e.source_instance event_source_instance,e.trust_context event_trust_context,r.id root_id,r.status root_status,r.version root_revision,r.definition_id,r.definition_version,d.status definition_status,v.config_snapshot_json FROM event_root_links l JOIN events e ON e.id=l.event_id JOIN automation_roots r ON r.id=l.root_id JOIN automation_definitions d ON d.id=r.definition_id JOIN automation_definition_versions v ON v.definition_id=r.definition_id AND v.version=r.definition_version WHERE l.event_id=? AND l.root_id=? AND e.schema_version=1`,
     )
     .get(eventId, rootId) as Row | undefined;
 }
@@ -241,6 +241,14 @@ function inspectFacts(
   });
   return {
     facts: {
+      sourceInstance:
+        typeof raw.event_source_instance === "string"
+          ? raw.event_source_instance
+          : null,
+      sourceTrustContext:
+        typeof raw.event_trust_context === "string"
+          ? raw.event_trust_context
+          : null,
       agentRegistered: !!profile,
       profileMatches,
       workspaceValid,

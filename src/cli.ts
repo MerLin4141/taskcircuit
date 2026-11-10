@@ -7,6 +7,7 @@ import {
 import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
 import { createWorkerPluginRegistry } from "./plugins/builtin/agents.js";
 import { createHub } from "./hub.js";
+import { parseDuration } from "./loop-limits.js";
 import {
   resolveCurrentStore,
   StorageGenerationError,
@@ -54,6 +55,7 @@ const jsonMode =
         "event",
         "automation",
         "root",
+        "apply",
       ].includes(command ?? "")) && args.includes("--json");
 if (jsonMode) args.splice(args.indexOf("--json"), 1);
 const port = Number(process.env.TASKCIRCUIT_PORT ?? 4317);
@@ -76,6 +78,74 @@ async function api(
 }
 const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
 async function main(): Promise<void> {
+  if (command === "apply") {
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log(
+        "用法: taskcircuit apply <文件> [--dry-run] [--json] — 校验并原子应用自动化规则",
+      );
+      return;
+    }
+    const dryRun = args.includes("--dry-run");
+    const files = args.filter((x) => x !== "--dry-run");
+    if (
+      files.length !== 1 ||
+      files[0].startsWith("--") ||
+      args.filter((x) => x === "--dry-run").length > 1
+    )
+      throw new Error("用法: taskcircuit apply <文件> [--dry-run] [--json]");
+    const document: unknown = JSON.parse(readFileSync(files[0], "utf8"));
+    const response = await fetch(new URL("/api/automations/apply", base), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ document, dryRun }),
+    });
+    const text = await response.text();
+    const value: unknown = text ? JSON.parse(text) : null;
+    if (
+      !response.ok &&
+      !(
+        response.status === 400 &&
+        value &&
+        typeof value === "object" &&
+        Array.isArray((value as { changes?: unknown }).changes)
+      )
+    )
+      throw new Error(`${response.status}: ${text}`);
+    const plan = value as {
+      documentId: string;
+      changes: {
+        automation: string;
+        action: string;
+        fromVersion: number | null;
+        toVersion: number | null;
+        reason?: string;
+      }[];
+      summary: {
+        create: number;
+        version: number;
+        unchanged: number;
+        conflict: number;
+        invalid: number;
+      };
+    };
+    if (jsonMode) print(plan);
+    else {
+      console.log(
+        `${dryRun ? "DRY RUN — no changes applied\n" : ""}Document: ${plan.documentId}`,
+      );
+      for (const change of plan.changes)
+        console.log(
+          `${change.action.toUpperCase()}  ${change.automation}  ${change.fromVersion ?? "—"} → ${change.toVersion ?? "—"}${change.reason ? `：${change.reason}` : ""}`,
+        );
+      console.log(
+        `新增: ${plan.summary.create}；更新: ${plan.summary.version}；未变: ${plan.summary.unchanged}`,
+      );
+      if (plan.summary.conflict || plan.summary.invalid)
+        console.log("存在冲突或无效规则，未应用任何更改。");
+    }
+    if (plan.summary.conflict || plan.summary.invalid) process.exitCode = 1;
+    return;
+  }
   if (command === "automation") {
     const action = args.shift();
     if (!action || action === "--help" || action === "-h") {
@@ -129,12 +199,10 @@ async function main(): Promise<void> {
         throw new Error("自动化参数不正确");
       options[key] = args[i + 1];
     }
-    const deadline = options.deadline?.match(/^(\d+)(s|m|h)$/);
-    if (options.deadline && !deadline)
-      throw new Error("期限格式应为 30s、15m 或 2h");
-    const seconds = deadline
-      ? Number(deadline[1]) * ({ s: 1, m: 60, h: 3600 }[deadline[2]] ?? 0)
-      : undefined;
+    const seconds =
+      options.deadline === undefined
+        ? undefined
+        : parseDuration(options.deadline);
     const value = await api("/api/automations", "POST", {
       id,
       eventType: options.event,
@@ -798,7 +866,7 @@ async function main(): Promise<void> {
     return;
   }
   console.log(
-    "用法: taskcircuit hub | worker [--once] | automation create/list/show | root list/show | event emit/show/list | emit <事件类型> | work create <事件类型> | work <工作ID> | answer <问题ID> <回答> | status | inbox | watch [--after 序号] | doctor | runtime | schedule list/add/pause/resume/cancel",
+    "用法: taskcircuit apply <文件> [--dry-run] [--json] | hub | worker [--once] | automation create/list/show | root list/show | event emit/show/list | emit <事件类型> | work create <事件类型> | work <工作ID> | answer <问题ID> <回答> | status | inbox | watch [--after 序号] | doctor | runtime | schedule list/add/pause/resume/cancel",
   );
 }
 main().catch((e) => {

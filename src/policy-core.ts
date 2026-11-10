@@ -14,6 +14,8 @@ export type PolicyInput = {
   eventType: string;
   definition: unknown;
   facts: {
+    sourceInstance?: string | null;
+    sourceTrustContext?: string | null;
     agentRegistered: boolean;
     profileMatches: boolean;
     workspaceValid: boolean;
@@ -64,6 +66,15 @@ export function evaluatePolicy(input: PolicyInput): DecisionProposal {
   if (!obj(input.definition) || !obj(input.definition.policy))
     return result("block", "policy_missing");
   const p = input.definition.policy;
+  if (p.sourceInstance !== undefined || p.sourceTrustContext !== undefined) {
+    if (
+      typeof p.sourceInstance !== "string" ||
+      typeof p.sourceTrustContext !== "string" ||
+      p.sourceInstance !== input.facts.sourceInstance ||
+      p.sourceTrustContext !== input.facts.sourceTrustContext
+    )
+      return result("block", "event_source_mismatch");
+  }
   if (!["authorize", "ignore", "wait", "block"].includes(String(p.effect)))
     return result("block", "policy_invalid");
   if (!strings(p.eventTypes)) return result("block", "policy_invalid");

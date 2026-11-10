@@ -35,6 +35,7 @@ import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
 import type { PluginRegistry } from "./plugins/registry.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
+import { applyDocument } from "./declarative.js";
 import { type HubOptions, type NotificationChannel } from "./notifications.js";
 import {
   nextCron,
@@ -621,6 +622,25 @@ export function createHub(
     "/api/automations/:id",
     async (req) => automationSummary(req.params.id) ?? missing(),
   );
+  hub.post("/api/automations/apply", async (req, reply) => {
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip))
+      throw new TaskCircuitError("apply_source_invalid", "仅接受本机连接", 403);
+    const body = req.body;
+    if (
+      !object(body) ||
+      Object.keys(body).some((k) => k !== "document" && k !== "dryRun") ||
+      typeof body.dryRun !== "boolean"
+    )
+      throw new TaskCircuitError("apply_invalid", "应用请求无效", 400);
+    const plan = applyDocument(
+      db,
+      config,
+      body.document,
+      body.dryRun,
+      clockNow,
+    );
+    return plan.summary.invalid ? reply.code(400).send(plan) : plan;
+  });
   hub.post("/api/automations", async (req) => {
     const b = req.body;
     if (

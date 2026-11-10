@@ -122,6 +122,17 @@ export function materializeDecision(
     )
       fail("materialization_instruction_invalid");
     if (
+      snapshot.notify !== undefined &&
+      (!Array.isArray(snapshot.notify) ||
+        snapshot.notify.some((id: unknown) => typeof id !== "string"))
+    )
+      fail("materialization_notify_invalid");
+    if (
+      snapshot.notifyOnCompleted !== undefined &&
+      typeof snapshot.notifyOnCompleted !== "boolean"
+    )
+      fail("materialization_notify_invalid");
+    if (
       !profile ||
       !config.agents[String(row!.agent_profile_id)] ||
       resultDigest(profile) !==
@@ -247,6 +258,10 @@ export function materializeDecision(
           : {}),
         ...(snapshot.instruction !== undefined
           ? { instruction: snapshot.instruction }
+          : {}),
+        ...(snapshot.notify !== undefined ? { notify: snapshot.notify } : {}),
+        ...(snapshot.notifyOnCompleted !== undefined
+          ? { notifyOnCompleted: snapshot.notifyOnCompleted }
           : {}),
       }),
       String(row!.root_id),

@@ -3,6 +3,20 @@ import { TaskCircuitError } from "./domain.js";
 type Row = Record<string, unknown>;
 const object = (v: unknown): v is Row =>
   !!v && typeof v === "object" && !Array.isArray(v);
+export function parseDuration(value: string): number {
+  const match = value.match(/^(\d+)(s|m|h)$/);
+  if (!match)
+    throw new TaskCircuitError(
+      "loop_config_invalid",
+      "期限格式应为 30s、15m 或 2h",
+      400,
+    );
+  const seconds =
+    Number(match[1]) * { s: 1, m: 60, h: 3600 }[match[2] as "s" | "m" | "h"];
+  if (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > 31536000)
+    throw new TaskCircuitError("loop_config_invalid", "期限无效", 400);
+  return seconds;
+}
 export function loopConfig(snapshot: unknown): {
   maxRuns: number;
   maxDurationSeconds: number;
