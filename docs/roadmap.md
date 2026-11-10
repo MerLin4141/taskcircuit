@@ -6,7 +6,7 @@ Release candidate: local durable automation, bounded continuation, human input a
 
 ## v0.3 — Plugin Architecture (tentative)
 
-Explore Source, Agent and Channel plugin boundaries. Scope and timing are not commitments.
+Stable Source, Agent and Channel extension boundaries, built-in plugins using the same registry, and a simpler declarative automation configuration. Scope and timing are not commitments.
 
 ## v0.4 — Automation Ecosystem (tentative)
 
