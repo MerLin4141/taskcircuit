@@ -40,7 +40,7 @@ export function createWorkerPluginRegistry(): PluginRegistry {
   const prepare = (path: string) => {
     mkdirSync(path, { recursive: true });
   };
-  registry.register(builtin("mock", new MockAgentAdapter()));
+  registry.register(builtin("mock", new MockAgentAdapter(), () => {}));
   registry.register(builtin("codex", new CodexAdapter(), prepare));
   registry.register(builtin("claude", new ClaudeAdapter(), prepare));
   return registry;

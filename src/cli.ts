@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+import { loadTrustedPlugins } from "./plugins/loader.js";
+import {
+  PluginRegistrationError,
+  PluginNotFoundError,
+} from "./plugins/errors.js";
+import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
 import { createWorkerPluginRegistry } from "./plugins/builtin/agents.js";
 import { createHub } from "./hub.js";
 import {
@@ -201,6 +207,13 @@ async function main(): Promise<void> {
     const config = existsSync(configPath)
       ? loadConfig(configPath)
       : defaultConfig;
+    const registry = createHubPluginRegistry();
+    await loadTrustedPlugins(
+      registry,
+      configPath,
+      config.plugins?.hub ?? [],
+      "hub",
+    );
     const interval = Number(
       process.env.TASKCIRCUIT_SCHEDULER_INTERVAL_MS ?? 1000,
     );
@@ -211,6 +224,8 @@ async function main(): Promise<void> {
       config,
       undefined,
       interval,
+      {},
+      { registry, sourceId: "local" },
     );
     await hub.listen({ port, host: "127.0.0.1" });
     let closing = false;
@@ -267,6 +282,16 @@ async function main(): Promise<void> {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     const registry = createWorkerPluginRegistry();
+    const configPath = join(process.cwd(), "taskcircuit.config.json");
+    const config = existsSync(configPath)
+      ? loadConfig(configPath)
+      : defaultConfig;
+    await loadTrustedPlugins(
+      registry,
+      configPath,
+      config.plugins?.worker ?? [],
+      "worker",
+    );
     if (args.includes("--once")) {
       await workOnce(
         base,
@@ -778,7 +803,9 @@ async function main(): Promise<void> {
 }
 main().catch((e) => {
   console.error(
-    e instanceof StorageGenerationError
+    e instanceof StorageGenerationError ||
+      e instanceof PluginRegistrationError ||
+      e instanceof PluginNotFoundError
       ? `${e.code}: ${e.message}`
       : e instanceof Error
         ? e.message
