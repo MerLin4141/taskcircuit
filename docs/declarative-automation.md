@@ -34,3 +34,5 @@ taskcircuit apply .\automations.json --json
 Dry-run validates and plans without database writes. Applying the same effective rule again is unchanged; changing a rule creates a new immutable version. Existing Roots continue using their pinned version. Manual Automations and Automations owned by a different document are not taken over. Conflicts or invalid rules block all writes, and omitting a previously applied rule does not delete or disable it. TaskCircuit does not watch or edit the source file. Only the SQLite mutations are atomic; the file and database are not one transaction.
 
 The endpoint accepts loopback requests under the Trusted Local model. Loopback is **not authentication**; other local processes may be able to access the Hub. Trusted Local and capability metadata are not an OS security sandbox. Do not put plugin module paths, credentials or elevated permissions in rule or Event data.
+
+For a complete runnable setup, see the [v0.3 Quick Start](quickstart-v0.3.md). Existing v0.2 configuration remains valid; using `apply` is optional.

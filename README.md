@@ -17,7 +17,7 @@ A Root represents one automation lifecycle. A Work Item can have multiple Execut
 
 ## Try the mock loop
 
-No Agent login or API credential is needed. Install Node.js 24 or newer, then follow the [v0.2 Quick Start](docs/quickstart-v0.2.md) to build, register a trusted local configuration, start Hub and Worker, create an Automation, emit an Event, and inspect the Root. The mock returns Continue twice and then Complete. `taskcircuit doctor`, `taskcircuit inbox`, and `taskcircuit answer` are available for diagnostics and human input.
+No Agent login or API credential is needed. Install Node.js 24 or newer, then follow the [v0.3 Quick Start](docs/quickstart-v0.3.md) to set up trusted configuration, apply a rules file, emit an event, and inspect the result. The mock returns Continue twice and then Complete. `taskcircuit doctor`, `taskcircuit inbox`, and `taskcircuit answer` are available for diagnostics and human input.
 
 For real Agents, install and authenticate [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://code.claude.com/) yourself and configure an Agent profile and event route. Calls may consume provider quota. TaskCircuit does not perform login. See [Agent configuration](docs/agents.md) and the [Phase 6 evidence](docs/design/v0.2-phase6-real-agent-e2e-report.md).
 
@@ -33,11 +33,13 @@ TaskCircuit uses a **Trusted Local** model. The loopback Hub is not user authent
 
 Windows is the primary validated platform. Actual Windows reboot/logon and Linux process-group cleanup have not been verified. The watch stream does not expose every Event/Root/Continue transition; Automation creation requires trusted Agent, event and workspace registration. Cancellation was observed for the managed process; a complete descendant inventory was not independently verified. Real Agent deadline, response-loss, Worker crash and Hub crash were not independently injected against both CLIs.
 
-v0.2 does not provide approval workflows, ActionIntent, Outbox, an external-side-effect exactly-once guarantee, plugin architecture, GitHub source plugins, Slack or email channels, multi-user access, RBAC, remote Workers, cloud runtime, OS sandbox, or complex token/cost budgets.
+v0.3 provides Agent, Source, and Channel plugins, including explicitly configured trusted external modules. Plugin top-level code runs with local user permissions. The generic active Source lifecycle is not implemented. See [plugin authoring](docs/plugin-authoring.md) and [declarative rules](docs/declarative-automation.md).
+
+v0.3 does not provide approval workflows, ActionIntent, Outbox, an external-side-effect exactly-once guarantee, GitHub source plugins, Slack or email channels, multi-user access, RBAC, remote Workers, cloud runtime, OS sandbox, or complex token/cost budgets.
 
 ## CLI and development
 
-Use `taskcircuit automation create/list/show`, `event emit/list/show`, `root list/show`, `inbox`, `answer`, `watch`, `doctor`, `status`, `work`, `schedule`, and Windows `runtime`. Existing commands and `--json` remain available; consult command help for supported arguments. See [architecture](docs/architecture.md), [API](docs/api.md), [roadmap](docs/roadmap.md), and [release notes](docs/releases/v0.2.0.md).
+Use `taskcircuit apply`, `automation create/list/show`, `event emit/list/show`, `root list/show`, `inbox`, `answer`, `watch`, `doctor`, `status`, `work`, `schedule`, and Windows `runtime`. Existing commands and `--json` remain available; consult command help for supported arguments. See [architecture](docs/architecture.md), [API](docs/api.md), [roadmap](docs/roadmap.md), [upgrade guide](docs/upgrade-v0.3.md), and [release notes](docs/releases/v0.3.0.md).
 
 ```powershell
 npm ci

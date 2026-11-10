@@ -69,3 +69,5 @@ export default function createPlugin() {
 ```
 
 The Agent and Channel examples are illustrative; use unique session IDs and implement actual delivery for a real integration. A Source can be declared and registered in the Hub with an `ingest` method, but there is no generic active Source lifecycle or configured ingress binding yet. Do not treat a successful plugin load as validation of untrusted code.
+
+For an end-to-end local setup, see the [v0.3 Quick Start](quickstart-v0.3.md). External plugin top-level code executes as trusted local code; it is not sandboxed.
