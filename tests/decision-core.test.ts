@@ -250,7 +250,7 @@ it("persists 1000 distinct decisions without starting agents", async () => {
   const f = await setup();
   try {
     // Scale sanity tests decision persistence, not durable disk throughput.
-    f.db.exec("PRAGMA synchronous=OFF");
+    f.db.exec("PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF");
     for (let i = 0; i < 1000; i++) {
       const e = ingestEvent(
         f.db,
