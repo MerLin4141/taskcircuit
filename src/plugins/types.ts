@@ -1,3 +1,4 @@
+import type { EventEnvelope, TrustedSource } from "../event-core.js";
 import type { AgentAdapter, AgentExecutionInput } from "../adapter.js";
 
 export const PLUGIN_API_VERSION = 1 as const;
@@ -17,6 +18,10 @@ export interface PluginBase {
 
 export interface SourcePlugin extends PluginBase {
   readonly manifest: PluginManifest & { kind: "source" };
+  ingest(input: unknown): {
+    sourceContext: TrustedSource;
+    envelope: EventEnvelope;
+  };
 }
 export interface AgentPlugin extends PluginBase, AgentAdapter {
   readonly manifest: PluginManifest & { kind: "agent" };

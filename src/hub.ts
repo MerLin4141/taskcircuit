@@ -30,11 +30,9 @@ import {
   listRootDecisions,
   processPendingDecisions,
 } from "./decision-core.js";
-import {
-  migrateEventCore,
-  ingestEvent,
-  type EventEnvelope,
-} from "./event-core.js";
+import { migrateEventCore, ingestEvent } from "./event-core.js";
+import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
+import type { PluginRegistry } from "./plugins/registry.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
 import {
@@ -83,7 +81,12 @@ export function createHub(
   clock: (() => number) | Clock = systemClock,
   pollIntervalMs = 1000,
   options: HubOptions = {},
+  sourceBinding: { registry: PluginRegistry; sourceId: string } = {
+    registry: createHubPluginRegistry(),
+    sourceId: "local",
+  },
 ) {
+  const sourcePlugin = sourceBinding.registry.getSource(sourceBinding.sourceId);
   const clockNow = typeof clock === "function" ? clock : () => clock.now();
   if (path !== ":memory:" && !existsSync(path))
     throw new TaskCircuitError(
@@ -1234,15 +1237,11 @@ export function createHub(
     const b = req.body;
     if (!object(b))
       throw new TaskCircuitError("event_invalid", "事件格式不正确", 400);
-    const result = ingestEvent(
-      db,
-      { sourceInstance: "local-cli", trustContext: "trusted_local_cli" },
-      b as unknown as EventEnvelope,
-      {
-        knownTypes: new Set(config.routes.map((r) => r.event.type)),
-        now: clockNow,
-      },
-    );
+    const { sourceContext, envelope } = sourcePlugin.ingest(b);
+    const result = ingestEvent(db, sourceContext, envelope, {
+      knownTypes: new Set(config.routes.map((r) => r.event.type)),
+      now: clockNow,
+    });
     if (result.status === "conflict")
       return reply.code(409).send({
         error: {
