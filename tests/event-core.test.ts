@@ -691,6 +691,8 @@ for (const count of [1000, 10000]) {
   it(`persists ${count} sequential Events with indexed delivery identity`, async () => {
     const f = await setup();
     try {
+      // Scale sanity tests application logic and indexes, not durable disk throughput.
+      f.db.exec("PRAGMA synchronous=OFF");
       const opts = { knownTypes: new Set<string>(), now: () => 0 };
       for (let i = 0; i < count; i++)
         ingestEvent(
@@ -984,6 +986,8 @@ it("paginates Root event history in durable insertion order", async () => {
   const f = await setup();
   let root = "";
   try {
+    // This connection only seeds pagination; recovery tests keep durable writes.
+    f.db.exec("PRAGMA synchronous=OFF");
     for (let i = 0; i < 101; i++) {
       const result = ingest(f.db, event(`page-${i}`));
       root = result.rootId!;

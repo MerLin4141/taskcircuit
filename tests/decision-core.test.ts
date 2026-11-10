@@ -249,6 +249,8 @@ it("Hub recovers post-commit pending events and rejects client-supplied authorit
 it("persists 1000 distinct decisions without starting agents", async () => {
   const f = await setup();
   try {
+    // Scale sanity tests decision persistence, not durable disk throughput.
+    f.db.exec("PRAGMA synchronous=OFF");
     for (let i = 0; i < 1000; i++) {
       const e = ingestEvent(
         f.db,
