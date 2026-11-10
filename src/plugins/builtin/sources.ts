@@ -1,3 +1,4 @@
+import { localConsolePlugin } from "./channels.js";
 import { TaskCircuitError } from "../../domain.js";
 import type { EventEnvelope } from "../../event-core.js";
 import { PluginRegistry } from "../registry.js";
@@ -25,5 +26,6 @@ export function createHubPluginRegistry(): PluginRegistry {
     },
   };
   registry.register(local);
+  registry.register(localConsolePlugin);
   return registry;
 }

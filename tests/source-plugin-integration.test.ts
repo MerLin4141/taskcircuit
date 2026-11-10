@@ -21,7 +21,9 @@ describe("source plugin ingress", () => {
     });
     expect(a.getSource("local")).not.toBe(b.getSource("local"));
     expect(a.listAgents()).toEqual([]);
-    expect(a.listChannels()).toEqual([]);
+    expect(a.listChannels().map((plugin) => plugin.manifest.id)).toEqual([
+      "local-console",
+    ]);
   });
   it("binds local context, ignores spoofed selectors and preserves duplicate/conflict", async () => {
     const h = createHub(":memory:", defaultConfig, undefined, 0, {
@@ -62,7 +64,7 @@ describe("source plugin ingress", () => {
     }
   });
   it("routes a test-only trusted source through Hub to Event Core", async () => {
-    const registry = new PluginRegistry();
+    const registry = createHubPluginRegistry();
     registry.register({
       manifest: {
         id: "test-source",
@@ -142,7 +144,7 @@ describe("source plugin ingress", () => {
     }
   });
   it("returns an existing event error when a trusted source rejects input", async () => {
-    const registry = new PluginRegistry();
+    const registry = createHubPluginRegistry();
     registry.register({
       manifest: {
         id: "reject",

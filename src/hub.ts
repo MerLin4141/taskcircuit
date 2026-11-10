@@ -35,11 +35,7 @@ import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
 import type { PluginRegistry } from "./plugins/registry.js";
 import type { Config } from "./config.js";
 import { TaskCircuitError } from "./domain.js";
-import {
-  LocalConsoleChannel,
-  type HubOptions,
-  type NotificationChannel,
-} from "./notifications.js";
+import { type HubOptions, type NotificationChannel } from "./notifications.js";
 import {
   nextCron,
   retryDelay,
@@ -81,12 +77,22 @@ export function createHub(
   clock: (() => number) | Clock = systemClock,
   pollIntervalMs = 1000,
   options: HubOptions = {},
-  sourceBinding: { registry: PluginRegistry; sourceId: string } = {
+  pluginBinding: { registry: PluginRegistry; sourceId: string } = {
     registry: createHubPluginRegistry(),
     sourceId: "local",
   },
 ) {
-  const sourcePlugin = sourceBinding.registry.getSource(sourceBinding.sourceId);
+  const sourcePlugin = pluginBinding.registry.getSource(pluginBinding.sourceId);
+  const channels: Record<string, NotificationChannel> =
+    options.channels ??
+    Object.fromEntries(
+      Object.entries(
+        config.channels ?? { local: { type: "local-console" } },
+      ).map(([id, channel]) => [
+        id,
+        pluginBinding.registry.getChannel(channel.type).createChannel({ id }),
+      ]),
+    );
   const clockNow = typeof clock === "function" ? clock : () => clock.now();
   if (path !== ":memory:" && !existsSync(path))
     throw new TaskCircuitError(
@@ -216,13 +222,6 @@ export function createHub(
       throw e;
     }
   };
-  const channels: Record<string, NotificationChannel> =
-    options.channels ??
-    Object.fromEntries(
-      Object.entries(
-        config.channels ?? { local: { type: "local-console" } },
-      ).map(([id]) => [id, new LocalConsoleChannel(id)]),
-    );
   const createNotification = (
     workId: string,
     interactionId: string | null,

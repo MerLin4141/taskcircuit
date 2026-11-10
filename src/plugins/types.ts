@@ -1,3 +1,4 @@
+import type { NotificationChannel } from "../notifications.js";
 import type { EventEnvelope, TrustedSource } from "../event-core.js";
 import type { AgentAdapter, AgentExecutionInput } from "../adapter.js";
 
@@ -30,5 +31,6 @@ export interface AgentPlugin extends PluginBase, AgentAdapter {
 }
 export interface ChannelPlugin extends PluginBase {
   readonly manifest: PluginManifest & { kind: "channel" };
+  createChannel(config: { id: string }): NotificationChannel;
 }
 export type Plugin = SourcePlugin | AgentPlugin | ChannelPlugin;
