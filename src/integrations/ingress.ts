@@ -84,6 +84,10 @@ function send(
   body: Record<string, string>,
 ) {
   if (response.destroyed || response.writableEnded) return;
+  if (status === 204) {
+    response.writeHead(status, { connection: "close" }).end();
+    return;
+  }
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     connection: "close",

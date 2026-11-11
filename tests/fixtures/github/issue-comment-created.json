@@ -1,0 +1,43 @@
+{
+  "repository": {
+    "id": 1001,
+    "full_name": "example/fixture",
+    "html_url": "https://github.com/example/fixture",
+    "private": false
+  },
+  "sender": {
+    "id": 2001,
+    "login": "fixture-user",
+    "type": "User"
+  },
+  "action": "created",
+  "issue": {
+    "id": 3001,
+    "number": 42,
+    "title": "Fixture issue",
+    "body": "A synthetic issue body",
+    "html_url": "https://github.com/example/fixture/issues/42",
+    "user": {
+      "id": 2001,
+      "login": "fixture-user",
+      "type": "User"
+    },
+    "labels": [
+      {
+        "id": 5001,
+        "name": "bug"
+      }
+    ],
+    "state": "open"
+  },
+  "comment": {
+    "id": 4001,
+    "body": "Fixture comment",
+    "html_url": "https://github.com/example/fixture/issues/42#issuecomment-4001",
+    "user": {
+      "id": 2001,
+      "login": "fixture-user",
+      "type": "User"
+    }
+  }
+}

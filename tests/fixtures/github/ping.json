@@ -1,0 +1,10 @@
+{
+  "zen": "Fixture ping",
+  "hook_id": 6001,
+  "repository": {
+    "id": 1001,
+    "full_name": "example/fixture",
+    "html_url": "https://github.com/example/fixture",
+    "private": false
+  }
+}

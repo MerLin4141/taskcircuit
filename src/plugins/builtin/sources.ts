@@ -1,5 +1,6 @@
 import { localConsolePlugin } from "./channels.js";
 import { webhookPlugin } from "./webhook.js";
+import { githubPlugin } from "./github.js";
 import { TaskCircuitError } from "../../domain.js";
 import type { EventEnvelope } from "../../event-core.js";
 import { PluginRegistry } from "../registry.js";
@@ -28,6 +29,7 @@ export function createHubPluginRegistry(): PluginRegistry {
   };
   registry.register(local);
   registry.register(webhookPlugin);
+  registry.register(githubPlugin);
   registry.register(localConsolePlugin);
   return registry;
 }

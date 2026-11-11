@@ -15,6 +15,15 @@ export function isIntegrationSecretEnv(name: unknown): name is string {
   );
 }
 
+export function resolveIntegrationSecret(name: unknown): string {
+  if (!isIntegrationSecretEnv(name))
+    throw new Error("integration_secret_reference_invalid");
+  const value = process.env[name];
+  if (!value || !value.trim())
+    throw new Error("integration_secret_unavailable");
+  return value;
+}
+
 export function workerEnvironment(
   config: Config,
   env: NodeJS.ProcessEnv,
