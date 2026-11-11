@@ -21,6 +21,10 @@ Root 表示一次自动化生命周期。同一个 Work Item 可以有多次 Exe
 
 使用真实 Agent 时，请自行安装并登录 [Codex CLI](https://github.com/openai/codex) 或 [Claude Code](https://code.claude.com/)，并配置 Agent 与事件路由；调用可能消耗服务额度。TaskCircuit 不代替用户登录。详见 [Agent 配置](docs/agents.md) 和 [Phase 6 验证记录](docs/design/v0.2-phase6-real-agent-e2e-report.md)。
 
+## 自动化模板
+
+用 [GitHub Issue Fixer](examples/templates/github-issue-fixer/README.md) 在本地处理 Issue，或用 [Webhook Task Runner](examples/templates/webhook-task-runner/README.md) 接收签名任务请求。复制配置和规则，编辑后用现有命令预览并应用。详见 [v0.4 自动化模板指南](docs/automation-templates.md)。
+
 ## 可靠性与升级
 
 Lease fencing 拒绝过期结果；结果不明时要求人工核实，不盲目重跑。结果回执和有限次数的协调用于确认 Hub 是否提交，不能保证外部副作用恰好一次。终止本地进程无法撤回已发送的请求，脱离进程树控制的后代进程也可能继续运行。

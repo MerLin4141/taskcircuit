@@ -21,6 +21,10 @@ No Agent login or API credential is needed. Install Node.js 24 or newer, then fo
 
 For real Agents, install and authenticate [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://code.claude.com/) yourself and configure an Agent profile and event route. Calls may consume provider quota. TaskCircuit does not perform login. See [Agent configuration](docs/agents.md) and the [Phase 6 evidence](docs/design/v0.2-phase6-real-agent-e2e-report.md).
 
+## Automation templates
+
+Start with [GitHub Issue Fixer](examples/templates/github-issue-fixer/README.md) for local issue work or [Webhook Task Runner](examples/templates/webhook-task-runner/README.md) for signed task requests. Copy and edit the paired config and rules, then preview and apply them with the existing CLI. See the [v0.4 template guide](docs/automation-templates.md).
+
 ## Reliability and storage
 
 Lease fencing rejects stale results. Unknown execution outcomes require operator verification rather than blind replay. Result receipts and bounded reconciliation confirm a Hub commit after a lost response; they do not guarantee exactly-once external side effects. A local process termination cannot retract a request already sent, and descendants that escape process-tree control can survive.

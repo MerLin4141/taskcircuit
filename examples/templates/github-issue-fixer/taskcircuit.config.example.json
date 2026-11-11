@@ -1,0 +1,46 @@
+{
+  "integrationIngress": {
+    "port": 8788
+  },
+  "sources": {
+    "project-github": {
+      "type": "github",
+      "required": true,
+      "config": {
+        "secretEnv": "TASKCIRCUIT_GITHUB_WEBHOOK_SECRET",
+        "allowedRepositoryIds": [1001],
+        "allowedSenderIds": [2001]
+      }
+    }
+  },
+  "agents": {
+    "codex-main": {
+      "adapter": "codex",
+      "isolation": "trusted-local"
+    }
+  },
+  "policyWorkspaces": {
+    "project-workspace": {
+      "path": "C:/path/to/your/repository",
+      "allowedRoot": "C:/path/to/your/repository",
+      "allowedCapabilities": ["read_files", "write_files", "shell"]
+    }
+  },
+  "routes": [
+    {
+      "id": "github-issue-fixer-route",
+      "event": {
+        "source": "project-github",
+        "type": "github.issue.opened"
+      },
+      "automationId": "issue-fixer",
+      "agent": "codex-main",
+      "title": "GitHub Issue Fixer"
+    }
+  ],
+  "channels": {
+    "local": {
+      "type": "local-console"
+    }
+  }
+}

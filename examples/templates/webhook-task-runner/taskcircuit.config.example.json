@@ -1,0 +1,47 @@
+{
+  "integrationIngress": {
+    "port": 8788
+  },
+  "sources": {
+    "task-webhook": {
+      "type": "webhook",
+      "required": true,
+      "config": {
+        "secretEnv": "TASKCIRCUIT_WEBHOOK_SECRET",
+        "eventType": "webhook.task",
+        "deliveryHeader": "x-taskcircuit-delivery",
+        "correlationField": "taskId"
+      }
+    }
+  },
+  "agents": {
+    "claude-main": {
+      "adapter": "claude",
+      "isolation": "trusted-local"
+    }
+  },
+  "policyWorkspaces": {
+    "task-workspace": {
+      "path": "C:/path/to/your/task-project",
+      "allowedRoot": "C:/path/to/your/task-project",
+      "allowedCapabilities": ["read_files", "write_files", "shell"]
+    }
+  },
+  "routes": [
+    {
+      "id": "webhook-task-runner-route",
+      "event": {
+        "source": "task-webhook",
+        "type": "webhook.task"
+      },
+      "automationId": "webhook-task",
+      "agent": "claude-main",
+      "title": "Webhook Task Runner"
+    }
+  ],
+  "channels": {
+    "local": {
+      "type": "local-console"
+    }
+  }
+}
