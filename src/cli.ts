@@ -5,6 +5,7 @@ import {
   PluginNotFoundError,
 } from "./plugins/errors.js";
 import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
+import { removeWorkerSecrets } from "./integrations/environment.js";
 import { createWorkerPluginRegistry } from "./plugins/builtin/agents.js";
 import { createHub } from "./hub.js";
 import { parseDuration } from "./loop-limits.js";
@@ -292,7 +293,7 @@ async function main(): Promise<void> {
       config,
       undefined,
       interval,
-      {},
+      { managementPort: port },
       { registry, sourceId: "local" },
     );
     let closing: Promise<void> | undefined;
@@ -376,6 +377,7 @@ async function main(): Promise<void> {
     const config = existsSync(configPath)
       ? loadConfig(configPath)
       : defaultConfig;
+    removeWorkerSecrets(config);
     await loadTrustedPlugins(
       registry,
       configPath,

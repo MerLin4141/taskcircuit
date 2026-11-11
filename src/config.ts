@@ -2,6 +2,7 @@ import { validDeclaration, type PluginDeclaration } from "./plugins/loader.js";
 import { readFileSync } from "node:fs";
 import { validPolicy, type RetryPolicy } from "./scheduling.js";
 import { isAbsolute } from "node:path";
+import type { IntegrationIngressConfig } from "./integrations/ingress.js";
 export interface AgentProfile {
   adapter: string;
   isolation?: "trusted-local" | "sandboxed";
@@ -38,6 +39,7 @@ export interface Config {
   schedules?: ConfigSchedule[];
   channels?: Record<string, { type: string }>;
   sources?: Record<string, SourceInstanceConfig>;
+  integrationIngress?: IntegrationIngressConfig;
   plugins?: { hub?: PluginDeclaration[]; worker?: PluginDeclaration[] };
   policyWorkspaces?: Record<
     string,
@@ -105,6 +107,22 @@ const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 export function validateSources(config: Config): void {
+  const ingress = config.integrationIngress;
+  if (
+    ingress !== undefined &&
+    (!record(ingress) ||
+      Object.keys(ingress).some(
+        (key) => !["port", "maxConcurrent"].includes(key),
+      ) ||
+      !Number.isInteger(ingress.port) ||
+      ingress.port < 1 ||
+      ingress.port > 65535 ||
+      (ingress.maxConcurrent !== undefined &&
+        (!Number.isInteger(ingress.maxConcurrent) ||
+          ingress.maxConcurrent < 1 ||
+          ingress.maxConcurrent > 256)))
+  )
+    throw new Error("integration_ingress_config_invalid");
   const sources = config.sources;
   if (
     sources !== undefined &&

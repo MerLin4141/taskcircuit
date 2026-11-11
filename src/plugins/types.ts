@@ -38,7 +38,18 @@ export type SourceSubmitResult = Pick<EventResult, "status" | "eventId">;
 export type SourceHealth =
   "starting" | "healthy" | "degraded" | "failed" | "stopped";
 
+export interface SourceHttpResponse {
+  status: number;
+  body: Record<string, string>;
+}
+export type SourceHttpHandler = (request: {
+  headers: Readonly<Record<string, string | undefined>>;
+  body: Uint8Array;
+  signal: AbortSignal;
+}) => Promise<SourceHttpResponse>;
+
 export interface SourceHost {
+  registerHttpHandler?(handler: SourceHttpHandler): () => void;
   submit(input: SourceSubmission): Promise<SourceSubmitResult>;
   reportHealth(state: "healthy" | "degraded" | "failed"): void;
 }
@@ -49,6 +60,7 @@ export interface SourceInstance {
 }
 
 export interface SourcePluginV2 extends PluginBase {
+  readonly http?: true;
   readonly manifest: PluginManifest & { kind: "source"; apiVersion: 2 };
   createSource(
     config: Record<string, unknown>,

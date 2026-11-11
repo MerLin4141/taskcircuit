@@ -36,6 +36,7 @@ import type { PluginRegistry } from "./plugins/registry.js";
 import { validateSources, type Config } from "./config.js";
 import { ActiveSources, bindActiveSources } from "./plugins/active-sources.js";
 import { isActiveSource } from "./plugins/types.js";
+import { IntegrationIngress } from "./integrations/ingress.js";
 import { TaskCircuitError } from "./domain.js";
 import { applyDocument } from "./declarative.js";
 import { type HubOptions, type NotificationChannel } from "./notifications.js";
@@ -93,6 +94,22 @@ export function createHub(
     pluginBinding.registry,
     config.sources,
   );
+  const needsIngress = sourceBindings.some(
+    ({ plugin }) => plugin.http === true,
+  );
+  if (needsIngress && !config.integrationIngress)
+    throw new Error("integration_ingress_required");
+  if (
+    needsIngress &&
+    options.managementPort === config.integrationIngress?.port
+  )
+    throw new Error("integration_ingress_port_collision");
+  const ingress =
+    needsIngress && config.integrationIngress
+      ? new IntegrationIngress(config.integrationIngress)
+      : undefined;
+  for (const { id, plugin } of sourceBindings)
+    if (plugin.http === true) ingress?.reserve(plugin.manifest.id, id);
   const channels: Record<string, NotificationChannel> =
     options.channels ??
     Object.fromEntries(
@@ -153,63 +170,85 @@ export function createHub(
   const activeSources = new ActiveSources(
     sourceBindings,
     (sourceInstance, input) => {
-      const trustContext = "external_untrusted";
-      // Reuse the first routing decision when checking a redelivery.
-      const previous = get(
-        "SELECT r.definition_id FROM event_deliveries d LEFT JOIN event_root_links l ON l.event_id=d.event_id LEFT JOIN automation_roots r ON r.id=l.root_id WHERE d.source_instance=? AND d.source_event_id=?",
-        sourceInstance,
-        typeof input.sourceEventId === "string" ? input.sourceEventId : "",
-      );
-      let automationId =
-        typeof previous?.definition_id === "string"
-          ? previous.definition_id
-          : undefined;
-      if (!previous) {
-        const route = config.routes.find(
-          (candidate) =>
-            candidate.event.source === sourceInstance &&
-            candidate.event.type === input.type,
+      db.exec("PRAGMA busy_timeout=250");
+      try {
+        const trustContext = "external_untrusted";
+        // Reuse the first routing decision when checking a redelivery.
+        const previous = get(
+          "SELECT r.definition_id FROM event_deliveries d LEFT JOIN event_root_links l ON l.event_id=d.event_id LEFT JOIN automation_roots r ON r.id=l.root_id WHERE d.source_instance=? AND d.source_event_id=?",
+          sourceInstance,
+          typeof input.sourceEventId === "string" ? input.sourceEventId : "",
         );
-        if (!route)
-          throw new TaskCircuitError(
-            "source_event_type_unconfigured",
-            "来源未配置该事件类型",
-            400,
+        let automationId =
+          typeof previous?.definition_id === "string"
+            ? previous.definition_id
+            : undefined;
+        if (!previous) {
+          const route = config.routes.find(
+            (candidate) =>
+              candidate.event.source === sourceInstance &&
+              candidate.event.type === input.type,
           );
-        automationId = route.automationId;
-        if (automationId) {
-          const version = get(
-            "SELECT v.config_snapshot_json FROM automation_definitions d JOIN automation_definition_versions v ON v.definition_id=d.id AND v.version=d.current_version WHERE d.id=? AND d.status='enabled'",
-            automationId,
-          );
-          const snapshot: unknown = version
-            ? JSON.parse(String(version.config_snapshot_json))
-            : null;
-          const policy = object(snapshot) ? snapshot.policy : null;
-          if (
-            !object(policy) ||
-            policy.sourceInstance !== sourceInstance ||
-            policy.sourceTrustContext !== trustContext ||
-            policy.agentProfileId !== route.agent ||
-            !Array.isArray(policy.eventTypes) ||
-            !policy.eventTypes.includes(input.type)
-          )
+          if (!route)
             throw new TaskCircuitError(
-              "source_route_unavailable",
-              "来源路由尚未就绪",
-              503,
+              "source_event_type_unconfigured",
+              "来源未配置该事件类型",
+              400,
             );
+          automationId = route.automationId;
+          if (automationId) {
+            const version = get(
+              "SELECT v.config_snapshot_json FROM automation_definitions d JOIN automation_definition_versions v ON v.definition_id=d.id AND v.version=d.current_version WHERE d.id=? AND d.status='enabled'",
+              automationId,
+            );
+            const snapshot: unknown = version
+              ? JSON.parse(String(version.config_snapshot_json))
+              : null;
+            const policy = object(snapshot) ? snapshot.policy : null;
+            if (
+              !object(policy) ||
+              policy.sourceInstance !== sourceInstance ||
+              policy.sourceTrustContext !== trustContext ||
+              policy.agentProfileId !== route.agent ||
+              !Array.isArray(policy.eventTypes) ||
+              !policy.eventTypes.includes(input.type)
+            )
+              throw new TaskCircuitError(
+                "source_route_unavailable",
+                "来源路由尚未就绪",
+                503,
+              );
+          }
         }
+        const { status, eventId } = ingestEvent(
+          db,
+          { sourceInstance, trustContext },
+          { ...input, ...(automationId ? { automationId } : {}) },
+          { knownTypes: new Set([input.type]), now: clockNow },
+        );
+        return { status, eventId };
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          "errcode" in error &&
+          typeof error.errcode === "number" &&
+          [5, 6].includes(error.errcode & 255)
+        )
+          throw new TaskCircuitError("source_intake_busy", "来源接收繁忙", 503);
+        throw error;
+      } finally {
+        db.exec("PRAGMA busy_timeout=5000");
       }
-      const { status, eventId } = ingestEvent(
-        db,
-        { sourceInstance, trustContext },
-        { ...input, ...(automationId ? { automationId } : {}) },
-        { knownTypes: new Set([input.type]), now: clockNow },
-      );
-      return { status, eventId };
     },
+    ingress,
   );
+  let stoppingSources: Promise<void> | undefined;
+  const stopSources = () =>
+    (stoppingSources ??= (async () => {
+      await ingress?.drain();
+      await activeSources.close();
+      await ingress?.close();
+    })());
   const rootSummary = (id: string): Row | null => {
     const root = get(
       `SELECT r.id,r.status,r.terminal_reason,r.created_at,r.deadline_at,r.max_runs,d.name automation FROM automation_roots r JOIN automation_definitions d ON d.id=r.definition_id WHERE r.id=?`,
@@ -636,7 +675,7 @@ export function createHub(
   });
   hub.addHook("preClose", async () => {
     for (const close of [...streams]) close();
-    await activeSources.close();
+    await stopSources();
   });
   hub.addHook("onClose", async () => {
     if (dispatcherTimer) clearInterval(dispatcherTimer);
@@ -2199,10 +2238,19 @@ export function createHub(
     }
   });
   Object.assign(hub, {
-    stopSources: () => activeSources.close(),
+    stopSources,
     getSourceHealth: () => activeSources.health(),
   });
-  hub.addHook("onReady", async () => activeSources.start());
+  hub.addHook("onReady", async () => {
+    try {
+      await ingress?.start();
+      await activeSources.start();
+      ingress?.open();
+    } catch (error) {
+      await stopSources();
+      throw error;
+    }
+  });
   hub.addHook("onClose", async () => {
     db.close();
   });

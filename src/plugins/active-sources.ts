@@ -1,9 +1,11 @@
 import type { SourceInstanceConfig } from "../config.js";
 import { TaskCircuitError } from "../domain.js";
 import type { PluginRegistry } from "./registry.js";
+import type { IntegrationIngress } from "../integrations/ingress.js";
 import {
   isActiveSource,
   type SourceHealth,
+  type SourceHttpHandler,
   type SourceInstance,
   type SourcePluginV2,
   type SourceSubmission,
@@ -11,7 +13,7 @@ import {
 } from "./types.js";
 
 const START_MS = 5000;
-const STOP_MS = 1500;
+const STOP_MS = 1200;
 const submissionKeys = new Set([
   "sourceEventId",
   "type",
@@ -92,6 +94,7 @@ export class ActiveSources {
       sourceId: string,
       input: SourceSubmission,
     ) => SourceSubmitResult,
+    private readonly ingress?: IntegrationIngress,
   ) {
     this.entries = bindings.map((binding) => ({
       ...binding,
@@ -137,9 +140,36 @@ export class ActiveSources {
 
   private async startEntry(entry: Entry, deadline: number) {
     if (Date.now() >= deadline) throw new Error("source_start_timeout");
+    const fail = () => {
+      if (entry.controller.signal.aborted) return;
+      entry.state = "failed";
+      entry.reason = "runtime_failed";
+      entry.controller.abort();
+      if (entry.instance) void this.stopEntry(entry);
+    };
+    const ingress = entry.plugin.http === true ? this.ingress : undefined;
+    let httpRegistered = false;
     const instance = entry.plugin.createSource(
       structuredClone(entry.config.config ?? {}),
       Object.freeze({
+        ...(ingress
+          ? {
+              registerHttpHandler: (handler: SourceHttpHandler) => {
+                const unregister = ingress.register(
+                  entry.plugin.manifest.id,
+                  entry.id,
+                  handler,
+                  entry.controller.signal,
+                  fail,
+                );
+                httpRegistered = true;
+                return () => {
+                  unregister();
+                  httpRegistered = false;
+                };
+              },
+            }
+          : {}),
         submit: async (input: SourceSubmission) => {
           if (
             !this.accepting ||
@@ -176,12 +206,8 @@ export class ActiveSources {
         },
         reportHealth: (state: "healthy" | "degraded" | "failed") => {
           if (entry.controller.signal.aborted) return;
-          if (state === "failed") {
-            entry.state = "failed";
-            entry.reason = "runtime_failed";
-            entry.controller.abort();
-            if (entry.instance) void this.stopEntry(entry);
-          } else if (
+          if (state === "failed") fail();
+          else if (
             (state === "healthy" || state === "degraded") &&
             (entry.state === "healthy" || entry.state === "degraded")
           )
@@ -206,6 +232,8 @@ export class ActiveSources {
     );
     if (entry.controller.signal.aborted)
       throw new Error("source_start_cancelled");
+    if (ingress && !httpRegistered)
+      throw new Error("integration_handler_required");
     entry.state = "healthy";
   }
 

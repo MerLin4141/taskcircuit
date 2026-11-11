@@ -67,7 +67,7 @@ function compile(
     names.add(name);
     exact(entry.when, ["source", "type"]);
     if (
-      entry.when.source !== "local" ||
+      typeof entry.when.source !== "string" ||
       typeof entry.when.type !== "string" ||
       entry.when.type.length > 128 ||
       !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(entry.when.type)
@@ -76,13 +76,18 @@ function compile(
     const agent = entry.agent;
     const workspace = entry.workspace;
     const eventType = entry.when.type;
+    const source = entry.when.source;
+    const local = source === "local";
+    if (!local && !Object.hasOwn(config.sources ?? {}, source))
+      return invalid("事件来源未在可信配置中注册");
     const matches = config.routes.filter(
-      (r) => r.event.source === "local" && r.event.type === eventType,
+      (r) => r.event.source === source && r.event.type === eventType,
     );
     if (
       !Object.hasOwn(config.agents, agent) ||
       matches.length !== 1 ||
-      matches[0].agent !== agent
+      matches[0].agent !== agent ||
+      (!local && matches[0].automationId !== name)
     )
       return invalid("Agent 或事件路由未在可信配置中注册，或路由存在歧义");
     if (
@@ -163,8 +168,10 @@ function compile(
           allowedCapabilities: ws.allowedCapabilities,
           requestedCapabilities: ws.allowedCapabilities,
           requiresApproval: false,
-          sourceInstance: "local-cli",
-          sourceTrustContext: "trusted_local_cli",
+          sourceInstance: local ? "local-cli" : source,
+          sourceTrustContext: local
+            ? "trusted_local_cli"
+            : "external_untrusted",
         },
         ...(entry.notify === undefined ? {} : { notify: entry.notify }),
         ...(entry.notifyOnCompleted === undefined

@@ -3,6 +3,7 @@ import { createServer, connect } from "node:net";
 import { randomUUID, randomBytes } from "node:crypto";
 import {
   mkdirSync,
+  existsSync,
   writeFileSync,
   renameSync,
   readFileSync,
@@ -12,6 +13,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipePath } from "./runtime.js";
 import { RuntimeLog } from "./log.js";
+import { defaultConfig, loadConfig } from "../../config.js";
+import { workerEnvironment } from "../../integrations/environment.js";
 const home = process.env.TASKCIRCUIT_HOME;
 if (!home) throw new Error("未配置 Runtime Home");
 const line = await new Promise<string>((resolve) => {
@@ -164,9 +167,17 @@ if (busy) {
   process.exitCode = 1;
 } else {
   const start = (name: "hub" | "worker") => {
+    const configPath = join(root, "taskcircuit.config.json");
+    const env = { ...process.env, TASKCIRCUIT_HOME: home };
     const child = fork(cli, [name], {
       cwd: root,
-      env: { ...process.env, TASKCIRCUIT_HOME: home },
+      env:
+        name === "worker"
+          ? workerEnvironment(
+              existsSync(configPath) ? loadConfig(configPath) : defaultConfig,
+              env,
+            )
+          : env,
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       windowsHide: true,
     });

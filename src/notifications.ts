@@ -30,6 +30,7 @@ export class LocalConsoleChannel implements NotificationChannel {
   }
 }
 export interface HubOptions {
+  managementPort?: number;
   dispatcherPollMs?: number;
   streamPollMs?: number;
   streamHeartbeatMs?: number;
