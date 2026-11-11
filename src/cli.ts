@@ -295,14 +295,22 @@ async function main(): Promise<void> {
       {},
       { registry, sourceId: "local" },
     );
-    await hub.listen({ port, host: "127.0.0.1" });
-    let closing = false;
-    const close = async () => {
-      if (closing) return;
-      closing = true;
-      await hub.close();
-      if (process.connected) process.disconnect();
-    };
+    let closing: Promise<void> | undefined;
+    const close = () =>
+      (closing ??= (async () => {
+        try {
+          await hub.stopSources();
+          const failures = hub
+            .getSourceHealth()
+            .filter((source) => source.stopFailure)
+            .map(({ id, stopFailure }) => ({ id, stopFailure }));
+          if (failures.length)
+            console.error(JSON.stringify({ component: "source", failures }));
+          await hub.close();
+        } finally {
+          if (process.connected) process.disconnect();
+        }
+      })());
     process.on("message", (message: unknown) => {
       if (
         message &&
@@ -317,6 +325,20 @@ async function main(): Promise<void> {
     process.on("SIGTERM", () => {
       void close();
     });
+    try {
+      await hub.listen({ port, host: "127.0.0.1" });
+    } catch (error) {
+      if (closing) {
+        await closing;
+        return;
+      }
+      await close();
+      throw error;
+    }
+    if (closing) {
+      await closing;
+      return;
+    }
     if (process.connected) process.send?.({ type: "ready" });
     console.log(
       JSON.stringify({

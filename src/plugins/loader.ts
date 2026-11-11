@@ -2,7 +2,9 @@ import { builtinModules } from "node:module";
 import { execFileSync } from "node:child_process";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { PluginRegistry } from "./registry.js";
+import { supportsPluginApi, type PluginRegistry } from "./registry.js";
+import { PluginApiVersionError } from "./errors.js";
+import { ACTIVE_SOURCE_API_VERSION } from "./types.js";
 import type { Plugin, PluginKind } from "./types.js";
 
 export interface PluginDeclaration {
@@ -108,20 +110,27 @@ export async function loadTrustedPlugins(
       if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error();
       const manifest = (
-        value as { manifest?: { id?: unknown; kind?: unknown } }
+        value as {
+          manifest?: { id?: unknown; kind?: unknown; apiVersion?: unknown };
+        }
       ).manifest;
       if (!manifest || manifest.id !== id || manifest.kind !== kind)
         throw new Error();
+      if (!supportsPluginApi(kind, manifest.apiVersion))
+        throw new PluginApiVersionError(id, kind);
       const method =
         kind === "agent"
           ? "execute"
           : kind === "source"
-            ? "ingest"
+            ? manifest.apiVersion === ACTIVE_SOURCE_API_VERSION
+              ? "createSource"
+              : "ingest"
             : "createChannel";
       if (typeof (value as Record<string, unknown>)[method] !== "function")
         throw new Error();
       plugin = value as Plugin;
-    } catch {
+    } catch (error) {
+      if (error instanceof PluginApiVersionError) throw error;
       throw new PluginLoadError("plugin_load_failed", processKind, id);
     }
     registry.register(plugin);

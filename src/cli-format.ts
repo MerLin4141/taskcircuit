@@ -181,7 +181,16 @@ export function formatDoctor(value: unknown): string {
           : key === "workers" && Array.isArray(check.detail)
             ? `${list(check.detail).filter((w) => w.state === "online").length} online`
             : undefined;
-      return `[${text(check.status)}] ${key}  ${text(check.message ?? check.version ?? check.path ?? detail)}`;
+      const summary = `[${text(check.status)}] ${key}  ${text(check.message ?? check.version ?? check.path ?? detail)}`;
+      if (key !== "hub") return summary;
+      const sources = list(row(check.detail).sources);
+      return [
+        summary,
+        ...sources.map(
+          (source) =>
+            `  Source ${text(source.id)} · ${text(source.implementation)} · API ${text(source.apiVersion)} · ${text(source.state)}`,
+        ),
+      ].join("\n");
     }),
   ].join("\n");
 }

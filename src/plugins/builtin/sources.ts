@@ -2,11 +2,11 @@ import { localConsolePlugin } from "./channels.js";
 import { TaskCircuitError } from "../../domain.js";
 import type { EventEnvelope } from "../../event-core.js";
 import { PluginRegistry } from "../registry.js";
-import { PLUGIN_API_VERSION, type SourcePlugin } from "../types.js";
+import { PLUGIN_API_VERSION, type SourcePluginV1 } from "../types.js";
 
 export function createHubPluginRegistry(): PluginRegistry {
   const registry = new PluginRegistry();
-  const local: SourcePlugin = {
+  const local: SourcePluginV1 = {
     manifest: {
       id: "local",
       kind: "source",

@@ -5,12 +5,20 @@ import {
 } from "./errors.js";
 import {
   PLUGIN_API_VERSION,
+  ACTIVE_SOURCE_API_VERSION,
   type AgentPlugin,
   type ChannelPlugin,
   type Plugin,
   type PluginKind,
   type SourcePlugin,
 } from "./types.js";
+
+export function supportsPluginApi(kind: string, version: unknown): boolean {
+  return (
+    version === PLUGIN_API_VERSION ||
+    (kind === "source" && version === ACTIVE_SOURCE_API_VERSION)
+  );
+}
 
 export class PluginRegistry {
   private readonly sources = new Map<string, SourcePlugin>();
@@ -43,7 +51,7 @@ export class PluginRegistry {
         "invalid manifest",
       );
     }
-    if (fields.apiVersion !== PLUGIN_API_VERSION)
+    if (!supportsPluginApi(kind, fields.apiVersion))
       throw new PluginApiVersionError(id, kind);
     const map = this.map(kind as PluginKind);
     if (map.has(id))

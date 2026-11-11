@@ -33,7 +33,9 @@ import {
 import { migrateEventCore, ingestEvent } from "./event-core.js";
 import { createHubPluginRegistry } from "./plugins/builtin/sources.js";
 import type { PluginRegistry } from "./plugins/registry.js";
-import type { Config } from "./config.js";
+import { validateSources, type Config } from "./config.js";
+import { ActiveSources, bindActiveSources } from "./plugins/active-sources.js";
+import { isActiveSource } from "./plugins/types.js";
 import { TaskCircuitError } from "./domain.js";
 import { applyDocument } from "./declarative.js";
 import { type HubOptions, type NotificationChannel } from "./notifications.js";
@@ -83,7 +85,14 @@ export function createHub(
     sourceId: "local",
   },
 ) {
+  validateSources(config);
   const sourcePlugin = pluginBinding.registry.getSource(pluginBinding.sourceId);
+  if (isActiveSource(sourcePlugin))
+    throw new Error("legacy_source_requires_api_1");
+  const sourceBindings = bindActiveSources(
+    pluginBinding.registry,
+    config.sources,
+  );
   const channels: Record<string, NotificationChannel> =
     options.channels ??
     Object.fromEntries(
@@ -141,6 +150,66 @@ export function createHub(
     db.prepare(sql).get(...args) as Row | undefined;
   const all = (sql: string, ...args: SQLInputValue[]) =>
     db.prepare(sql).all(...args) as Row[];
+  const activeSources = new ActiveSources(
+    sourceBindings,
+    (sourceInstance, input) => {
+      const trustContext = "external_untrusted";
+      // Reuse the first routing decision when checking a redelivery.
+      const previous = get(
+        "SELECT r.definition_id FROM event_deliveries d LEFT JOIN event_root_links l ON l.event_id=d.event_id LEFT JOIN automation_roots r ON r.id=l.root_id WHERE d.source_instance=? AND d.source_event_id=?",
+        sourceInstance,
+        typeof input.sourceEventId === "string" ? input.sourceEventId : "",
+      );
+      let automationId =
+        typeof previous?.definition_id === "string"
+          ? previous.definition_id
+          : undefined;
+      if (!previous) {
+        const route = config.routes.find(
+          (candidate) =>
+            candidate.event.source === sourceInstance &&
+            candidate.event.type === input.type,
+        );
+        if (!route)
+          throw new TaskCircuitError(
+            "source_event_type_unconfigured",
+            "来源未配置该事件类型",
+            400,
+          );
+        automationId = route.automationId;
+        if (automationId) {
+          const version = get(
+            "SELECT v.config_snapshot_json FROM automation_definitions d JOIN automation_definition_versions v ON v.definition_id=d.id AND v.version=d.current_version WHERE d.id=? AND d.status='enabled'",
+            automationId,
+          );
+          const snapshot: unknown = version
+            ? JSON.parse(String(version.config_snapshot_json))
+            : null;
+          const policy = object(snapshot) ? snapshot.policy : null;
+          if (
+            !object(policy) ||
+            policy.sourceInstance !== sourceInstance ||
+            policy.sourceTrustContext !== trustContext ||
+            policy.agentProfileId !== route.agent ||
+            !Array.isArray(policy.eventTypes) ||
+            !policy.eventTypes.includes(input.type)
+          )
+            throw new TaskCircuitError(
+              "source_route_unavailable",
+              "来源路由尚未就绪",
+              503,
+            );
+        }
+      }
+      const { status, eventId } = ingestEvent(
+        db,
+        { sourceInstance, trustContext },
+        { ...input, ...(automationId ? { automationId } : {}) },
+        { knownTypes: new Set([input.type]), now: clockNow },
+      );
+      return { status, eventId };
+    },
+  );
   const rootSummary = (id: string): Row | null => {
     const root = get(
       `SELECT r.id,r.status,r.terminal_reason,r.created_at,r.deadline_at,r.max_runs,d.name automation FROM automation_roots r JOIN automation_definitions d ON d.id=r.definition_id WHERE r.id=?`,
@@ -567,6 +636,7 @@ export function createHub(
   });
   hub.addHook("preClose", async () => {
     for (const close of [...streams]) close();
+    await activeSources.close();
   });
   hub.addHook("onClose", async () => {
     if (dispatcherTimer) clearInterval(dispatcherTimer);
@@ -763,7 +833,11 @@ export function createHub(
             : "stale",
     })),
   );
-  hub.get("/api/health", async () => ({ ok: true, service: "taskcircuit" }));
+  hub.get("/api/health", async () => ({
+    ok: true,
+    service: "taskcircuit",
+    ...(sourceBindings.length ? { sources: activeSources.health() } : {}),
+  }));
   hub.get("/api/diagnostics", async () => ({
     schema: Number(get("SELECT MAX(version) v FROM schema_migrations")?.v),
     agentProfiles: Object.keys(config.agents).sort(),
@@ -794,7 +868,7 @@ export function createHub(
     if (
       !["once", "cron"].includes(String(b.kind)) ||
       !object(b.event) ||
-      !str(b.event.source) ||
+      b.event.source !== "local" ||
       !str(b.event.type) ||
       !object(b.event.payload)
     )
@@ -1169,6 +1243,7 @@ export function createHub(
     if (timer) clearInterval(timer);
   });
   const createEvent = (b: Row, eventTime?: string) => {
+    if (b.source !== "local") return missing();
     const route = config.routes.find(
       (r) => r.event.source === b.source && r.event.type === b.type,
     );
@@ -2123,6 +2198,11 @@ export function createHub(
       }
     }
   });
+  Object.assign(hub, {
+    stopSources: () => activeSources.close(),
+    getSourceHealth: () => activeSources.health(),
+  });
+  hub.addHook("onReady", async () => activeSources.start());
   hub.addHook("onClose", async () => {
     db.close();
   });
@@ -2132,5 +2212,7 @@ export function createHub(
     pruneChanges: (maxChanges?: number) => number;
     dispatchNotifications: () => Promise<void>;
     getStreamCount: () => number;
+    stopSources: () => Promise<void>;
+    getSourceHealth: () => ReturnType<ActiveSources["health"]>;
   };
 }

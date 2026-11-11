@@ -16,6 +16,7 @@ export interface Route {
   agent: string;
   title: string;
   instruction?: string;
+  automationId?: string;
   retryPolicy?: RetryPolicy;
   notify?: string[];
   notifyOnCompleted?: boolean;
@@ -26,11 +27,17 @@ export interface ConfigSchedule {
   timezone?: string;
   event: { source: string; type: string; payload?: Record<string, unknown> };
 }
+export interface SourceInstanceConfig {
+  type: string;
+  required?: boolean;
+  config?: Record<string, unknown>;
+}
 export interface Config {
   agents: Record<string, AgentProfile>;
   routes: Route[];
   schedules?: ConfigSchedule[];
   channels?: Record<string, { type: string }>;
+  sources?: Record<string, SourceInstanceConfig>;
   plugins?: { hub?: PluginDeclaration[]; worker?: PluginDeclaration[] };
   policyWorkspaces?: Record<
     string,
@@ -91,6 +98,48 @@ export const defaultConfig: Config = {
     })),
   ],
 };
+const sourceId = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value);
+
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+export function validateSources(config: Config): void {
+  const sources = config.sources;
+  if (
+    sources !== undefined &&
+    (!record(sources) ||
+      Object.entries(sources).some(
+        ([id, entry]) =>
+          !sourceId(id) ||
+          ["local", "local-cli"].includes(id) ||
+          !record(entry) ||
+          Object.keys(entry).some(
+            (key) => !["type", "required", "config"].includes(key),
+          ) ||
+          !sourceId(entry.type) ||
+          (entry.required !== undefined &&
+            typeof entry.required !== "boolean") ||
+          (entry.config !== undefined && !record(entry.config)),
+      ))
+  )
+    throw new Error("source_config_invalid");
+
+  for (const route of config.routes) {
+    const local = route.event.source === "local";
+    if (!local && !Object.hasOwn(sources ?? {}, route.event.source))
+      throw new Error("source_route_instance_unknown");
+    if (
+      route.automationId !== undefined &&
+      (local || !sourceId(route.automationId))
+    )
+      throw new Error("source_route_automation_invalid");
+  }
+
+  if (config.schedules?.some((schedule) => schedule.event.source !== "local"))
+    throw new Error("source_schedule_not_local");
+}
+
 export function loadConfig(path: string): Config {
   const value: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -214,5 +263,6 @@ export function loadConfig(path: string): Config {
       scheduleIds.add(schedule.id);
     }
   }
+  validateSources(config);
   return config;
 }
