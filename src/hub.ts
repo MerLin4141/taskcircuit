@@ -39,7 +39,8 @@ import { isActiveSource } from "./plugins/types.js";
 import { IntegrationIngress } from "./integrations/ingress.js";
 import { TaskCircuitError } from "./domain.js";
 import { applyDocument } from "./declarative.js";
-import { type HubOptions, type NotificationChannel } from "./notifications.js";
+import { type HubOptions } from "./notifications.js";
+import { bindChannels } from "./plugins/channel-host.js";
 import {
   nextCron,
   retryDelay,
@@ -110,16 +111,7 @@ export function createHub(
       : undefined;
   for (const { id, plugin } of sourceBindings)
     if (plugin.http === true) ingress?.reserve(plugin.manifest.id, id);
-  const channels: Record<string, NotificationChannel> =
-    options.channels ??
-    Object.fromEntries(
-      Object.entries(
-        config.channels ?? { local: { type: "local-console" } },
-      ).map(([id, channel]) => [
-        id,
-        pluginBinding.registry.getChannel(channel.type).createChannel({ id }),
-      ]),
-    );
+
   const clockNow = typeof clock === "function" ? clock : () => clock.now();
   if (path !== ":memory:" && !existsSync(path))
     throw new TaskCircuitError(
@@ -128,6 +120,7 @@ export function createHub(
       409,
     );
   const db = new DatabaseSync(path);
+  let channelHost: ReturnType<typeof bindChannels>;
   try {
     if (path === ":memory:") {
       db.exec("PRAGMA foreign_keys=ON");
@@ -156,10 +149,16 @@ export function createHub(
     migrateDecisionCore(db);
     migrateMaterialization(db);
     migrateLoopLimits(db);
+    channelHost = bindChannels(
+      pluginBinding.registry,
+      config.channels,
+      options.channels,
+    );
   } catch (error) {
     db.close();
     throw error;
   }
+  const { channels, stop: stopChannels } = channelHost;
   const hub = Fastify({ logger: false });
   const run = (sql: string, ...args: SQLInputValue[]) =>
     db.prepare(sql).run(...args);
@@ -452,6 +451,7 @@ export function createHub(
     ).map(shape);
   let dispatching: Promise<void> | undefined;
   const dispatchNotifications = (): Promise<void> => {
+    if (channelHost.signal.aborted) return Promise.resolve();
     if (dispatching) return dispatching;
     dispatching = (async () => {
       const claimed = tx(() => {
@@ -674,6 +674,7 @@ export function createHub(
     maintenanceTimer.unref();
   });
   hub.addHook("preClose", async () => {
+    void stopChannels();
     for (const close of [...streams]) close();
     await stopSources();
   });
@@ -681,6 +682,7 @@ export function createHub(
     if (dispatcherTimer) clearInterval(dispatcherTimer);
     if (maintenanceTimer) clearInterval(maintenanceTimer);
     for (const close of streams) close();
+    await stopChannels();
     if (dispatching) await dispatching;
   });
   const bad = (message: string): never => {
@@ -876,6 +878,7 @@ export function createHub(
     ok: true,
     service: "taskcircuit",
     ...(sourceBindings.length ? { sources: activeSources.health() } : {}),
+    ...channelHost.health(),
   }));
   hub.get("/api/diagnostics", async () => ({
     schema: Number(get("SELECT MAX(version) v FROM schema_migrations")?.v),
@@ -2239,6 +2242,7 @@ export function createHub(
   });
   Object.assign(hub, {
     stopSources,
+    stopChannels,
     getSourceHealth: () => activeSources.health(),
   });
   hub.addHook("onReady", async () => {
@@ -2261,6 +2265,7 @@ export function createHub(
     dispatchNotifications: () => Promise<void>;
     getStreamCount: () => number;
     stopSources: () => Promise<void>;
+    stopChannels: () => Promise<void>;
     getSourceHealth: () => ReturnType<ActiveSources["health"]>;
   };
 }

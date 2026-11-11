@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createHub } from "./fixtures/g2-hub.js";
 import { defaultConfig, type Config } from "../src/config.js";
 import { createHubPluginRegistry } from "../src/plugins/builtin/sources.js";
+import { isChannelV2 } from "../src/plugins/types.js";
 import {
   PluginApiVersionError,
   PluginNotFoundError,
@@ -54,6 +55,7 @@ describe("Channel Plugin integration", () => {
   it("registers local-console through the Hub registry and preserves instance identity", () => {
     const r = createHubPluginRegistry();
     const plugin = r.getChannel("local-console");
+    if (isChannelV2(plugin)) throw new Error("local-console must retain API 1");
     expect(plugin.manifest).toMatchObject({
       id: "local-console",
       kind: "channel",
@@ -68,8 +70,8 @@ describe("Channel Plugin integration", () => {
     expect(() =>
       r.register({
         ...plugin,
-        manifest: { ...plugin.manifest, id: "bad", apiVersion: 2 },
-      }),
+        manifest: { ...plugin.manifest, id: "bad", apiVersion: 3 },
+      } as unknown as typeof plugin),
     ).toThrow(PluginApiVersionError);
     expect(() => r.getChannel("missing")).toThrow(PluginNotFoundError);
   });
@@ -93,8 +95,11 @@ describe("Channel Plugin integration", () => {
         apiVersion: 1,
         version: "test",
       },
-      createChannel({ id }) {
-        created.push(id);
+      createChannel(options) {
+        expect(Object.keys(options)).toEqual(["id"]);
+        expect(arguments).toHaveLength(1);
+        created.push(options.id);
+        const { id } = options;
         return {
           id,
           async deliver(input) {

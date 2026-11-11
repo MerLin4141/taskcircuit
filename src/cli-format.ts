@@ -183,12 +183,16 @@ export function formatDoctor(value: unknown): string {
             : undefined;
       const summary = `[${text(check.status)}] ${key}  ${text(check.message ?? check.version ?? check.path ?? detail)}`;
       if (key !== "hub") return summary;
-      const sources = list(row(check.detail).sources);
+      const { sources, channels } = row(check.detail);
       return [
         summary,
-        ...sources.map(
+        ...list(sources).map(
           (source) =>
             `  Source ${text(source.id)} · ${text(source.implementation)} · API ${text(source.apiVersion)} · ${text(source.state)}`,
+        ),
+        ...list(channels).map(
+          (channel) =>
+            `  Channel ${text(channel.id)} · ${text(channel.implementation)} · API ${text(channel.apiVersion)} · ${text(channel.state)}`,
         ),
       ].join("\n");
     }),

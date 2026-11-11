@@ -131,6 +131,34 @@ describe("trusted local plugin loader", () => {
     ).rejects.toThrow();
     expect(r.hasAgent("sample")).toBe(false);
   });
+  it.each([1, 2, 3])(
+    "enforces exact Channel API version %i",
+    async (version) => {
+      const dir = setup();
+      writeFileSync(
+        join(dir, "channel.mjs"),
+        moduleText("fixture", "channel", version),
+      );
+      const registry = createHubPluginRegistry();
+      const loading = loadTrustedPlugins(
+        registry,
+        join(dir, "taskcircuit.config.json"),
+        [declaration("fixture", "channel", "./channel.mjs")],
+        "hub",
+      );
+      if (version === 3) {
+        await expect(loading).rejects.toMatchObject({
+          code: "plugin_api_incompatible",
+        });
+        expect(registry.hasChannel("fixture")).toBe(false);
+      } else {
+        await loading;
+        expect(registry.getChannel("fixture").manifest.apiVersion).toBe(
+          version,
+        );
+      }
+    },
+  );
   it("rejects process-kind mismatch before importing module", async () => {
     const dir = setup(),
       file = join(dir, "agent.mjs");

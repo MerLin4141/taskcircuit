@@ -37,7 +37,7 @@ export interface Config {
   agents: Record<string, AgentProfile>;
   routes: Route[];
   schedules?: ConfigSchedule[];
-  channels?: Record<string, { type: string }>;
+  channels?: Record<string, { type: string; config?: Record<string, unknown> }>;
   sources?: Record<string, SourceInstanceConfig>;
   integrationIngress?: IntegrationIngressConfig;
   plugins?: { hub?: PluginDeclaration[]; worker?: PluginDeclaration[] };
@@ -196,6 +196,7 @@ export function loadConfig(path: string): Config {
   ]);
   const channelIds = new Set([
     "local-console",
+    "feishu-channel",
     ...(config.plugins?.hub ?? [])
       .filter((p) => p.kind === "channel")
       .map((p) => p.id),
@@ -247,7 +248,14 @@ export function loadConfig(path: string): Config {
       typeof config.channels !== "object" ||
       Array.isArray(config.channels) ||
       Object.entries(config.channels).some(
-        ([id, c]) => !id || !c || !channelIds.has(c.type),
+        ([id, c]) =>
+          !id ||
+          !c ||
+          !channelIds.has(c.type) ||
+          (c.config !== undefined &&
+            (!c.config ||
+              typeof c.config !== "object" ||
+              Array.isArray(c.config))),
       ))
   )
     throw new Error("通知通道配置无效");

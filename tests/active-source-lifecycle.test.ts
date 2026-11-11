@@ -136,7 +136,7 @@ it("loads unchanged passive Source API 1 and active Source API 2 modules togethe
 it.each([
   ["source", 3, "hub"],
   ["agent", 2, "worker"],
-  ["channel", 2, "hub"],
+  ["channel", 3, "hub"],
 ] as const)(
   "rejects %s API %d before registration",
   async (kind, apiVersion, processKind) => {

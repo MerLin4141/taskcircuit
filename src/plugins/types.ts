@@ -9,6 +9,7 @@ import type { AgentAdapter, AgentExecutionInput } from "../adapter.js";
 export const PLUGIN_API_VERSION = 1 as const;
 
 export const ACTIVE_SOURCE_API_VERSION = 2 as const;
+export const CHANNEL_API_VERSION = 2 as const;
 
 export type PluginKind = "source" | "agent" | "channel";
 
@@ -78,8 +79,30 @@ export interface AgentPlugin extends PluginBase, AgentAdapter {
   prepareWorkingDirectory?(path: string): void;
   prepareInput?(input: AgentExecutionInput): AgentExecutionInput;
 }
-export interface ChannelPlugin extends PluginBase {
+export interface ChannelPluginV1 extends PluginBase {
   readonly manifest: PluginManifest & { kind: "channel"; apiVersion: 1 };
   createChannel(config: { id: string }): NotificationChannel;
 }
-export type Plugin = SourcePlugin | AgentPlugin | ChannelPlugin;
+export type ChannelPlugin = ChannelPluginV1;
+export type ChannelHealth = "healthy" | "degraded" | "failed";
+export interface ChannelHost {
+  readonly signal: AbortSignal;
+  reportHealth(state: ChannelHealth): void;
+}
+export interface ChannelInstance extends NotificationChannel {
+  stop?(): Promise<void>;
+}
+export interface ChannelPluginV2 extends PluginBase {
+  readonly manifest: PluginManifest & { kind: "channel"; apiVersion: 2 };
+  createChannel(
+    options: { id: string; config: Record<string, unknown> },
+    host: ChannelHost,
+  ): ChannelInstance;
+}
+export type RegisteredChannelPlugin = ChannelPluginV1 | ChannelPluginV2;
+export function isChannelV2(
+  plugin: RegisteredChannelPlugin,
+): plugin is ChannelPluginV2 {
+  return plugin.manifest.apiVersion === CHANNEL_API_VERSION;
+}
+export type Plugin = SourcePlugin | AgentPlugin | RegisteredChannelPlugin;

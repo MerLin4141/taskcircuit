@@ -11,6 +11,7 @@ export function isIntegrationSecretEnv(name: unknown): name is string {
   return (
     typeof name === "string" &&
     /^TASKCIRCUIT_[A-Z0-9_]+$/.test(name) &&
+    name.trim() === name &&
     !runtimeNames.has(name)
   );
 }
@@ -29,8 +30,15 @@ export function workerEnvironment(
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const references = new Set(
-    Object.values(config.sources ?? {})
-      .map((source) => source.config?.secretEnv)
+    [
+      ...Object.values(config.sources ?? {}).map(
+        (source) => source.config?.secretEnv,
+      ),
+      ...Object.values(config.channels ?? {}).flatMap(({ config }) => [
+        config?.webhookUrlEnv,
+        config?.signingSecretEnv,
+      ]),
+    ]
       .filter(isIntegrationSecretEnv)
       .map((name) => name.toUpperCase()),
   );

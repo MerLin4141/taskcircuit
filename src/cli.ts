@@ -300,6 +300,7 @@ async function main(): Promise<void> {
     const close = () =>
       (closing ??= (async () => {
         try {
+          void hub.stopChannels();
           await hub.stopSources();
           const failures = hub
             .getSourceHealth()

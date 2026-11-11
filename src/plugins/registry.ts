@@ -6,8 +6,9 @@ import {
 import {
   PLUGIN_API_VERSION,
   ACTIVE_SOURCE_API_VERSION,
+  CHANNEL_API_VERSION,
   type AgentPlugin,
-  type ChannelPlugin,
+  type RegisteredChannelPlugin,
   type Plugin,
   type PluginKind,
   type SourcePlugin,
@@ -16,14 +17,15 @@ import {
 export function supportsPluginApi(kind: string, version: unknown): boolean {
   return (
     version === PLUGIN_API_VERSION ||
-    (kind === "source" && version === ACTIVE_SOURCE_API_VERSION)
+    (kind === "source" && version === ACTIVE_SOURCE_API_VERSION) ||
+    (kind === "channel" && version === CHANNEL_API_VERSION)
   );
 }
 
 export class PluginRegistry {
   private readonly sources = new Map<string, SourcePlugin>();
   private readonly agents = new Map<string, AgentPlugin>();
-  private readonly channels = new Map<string, ChannelPlugin>();
+  private readonly channels = new Map<string, RegisteredChannelPlugin>();
 
   // Only trusted composition code supplies constructed plugins; event data is never a registry input.
   register(plugin: Plugin): void {
@@ -69,7 +71,7 @@ export class PluginRegistry {
         this.agents.set(id, plugin as AgentPlugin);
         break;
       case "channel":
-        this.channels.set(id, plugin as ChannelPlugin);
+        this.channels.set(id, plugin as RegisteredChannelPlugin);
         break;
     }
   }
@@ -103,7 +105,7 @@ export class PluginRegistry {
   getAgent(id: string): AgentPlugin {
     return this.get(this.agents, "agent", id);
   }
-  getChannel(id: string): ChannelPlugin {
+  getChannel(id: string): RegisteredChannelPlugin {
     return this.get(this.channels, "channel", id);
   }
   hasSource(id: string): boolean {
@@ -121,7 +123,7 @@ export class PluginRegistry {
   listAgents(): AgentPlugin[] {
     return this.list(this.agents);
   }
-  listChannels(): ChannelPlugin[] {
+  listChannels(): RegisteredChannelPlugin[] {
     return this.list(this.channels);
   }
 }

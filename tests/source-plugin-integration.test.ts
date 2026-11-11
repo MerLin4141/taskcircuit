@@ -22,6 +22,7 @@ describe("source plugin ingress", () => {
     expect(a.getSource("local")).not.toBe(b.getSource("local"));
     expect(a.listAgents()).toEqual([]);
     expect(a.listChannels().map((plugin) => plugin.manifest.id)).toEqual([
+      "feishu-channel",
       "local-console",
     ]);
   });
