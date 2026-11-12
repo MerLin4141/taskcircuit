@@ -28,13 +28,13 @@ TaskCircuit 使用 **Trusted Local** 模型。回环地址不是用户认证，�
 
 Windows 是主要验证平台。尚未验证实际 Windows 重启/登录和 Linux 进程组清理。Watch 不能展示全部 Event/Root/Continue 过程；创建自动化前需要注册可信 Agent、事件和工作目录。取消已观察到受管理进程收到停止信号，但未独立盘点全部后代进程。真实 Agent 的 deadline、响应丢失、Worker 崩溃及 Hub 崩溃未分别对两种 CLI 注入验证。
 
-v0.3 提供 Agent、Source 和 Channel 插件，支持显式配置的可信外部模块。外部插件的顶层代码以本机用户权限运行；v0.4 开发分支加入主动 Source、飞书通知和项目级配置选择。详见[插件说明](docs/plugin-authoring.md)和[声明式规则](docs/declarative-automation.md)。
+v0.4 支持主动 Source API 2、Channel API 2 及现有 API 1 插件。显式配置的可信外部模块以本机用户权限运行。详见[插件说明](docs/plugin-authoring.md)和[声明式规则](docs/declarative-automation.md)。
 
-v0.3 不提供审批流程、ActionIntent、Outbox、外部副作用恰好一次保证、GitHub Source 插件、Slack 或邮件通道、多用户、RBAC、远程 Worker、云运行时、OS 沙箱或复杂 token/成本预算。
+GitHub 仅接收事件，飞书仅发送群通知。多 Agent、远程 Worker、云运行时和多用户/RBAC 不在 v0.4 范围内。
 
 ## 命令与开发
 
-主要命令包括 `taskcircuit apply`、`automation create/list/show`、`event emit/list/show`、`root list/show`、`inbox`、`answer`、`watch`、`doctor`、`status`、`work`、`schedule` 和 Windows `runtime`。旧命令和 `--json` 仍可使用，参数以命令帮助为准。详见 [架构](docs/architecture.md)、[API](docs/api.md)、[路线图](docs/roadmap.md) 和 [升级指南](docs/upgrade-v0.3.md)和[发布说明](docs/releases/v0.3.0.md)。
+主要命令包括 `taskcircuit apply`、`automation create/list/show`、`event emit/list/show`、`root list/show`、`inbox`、`answer`、`watch`、`doctor`、`status`、`work`、`schedule` 和 Windows `runtime`。旧命令和 `--json` 仍可使用，参数以命令帮助为准。详见 [架构](docs/architecture.md)、[API](docs/api.md)、[路线图](docs/roadmap.md) 和 [升级指南](docs/upgrade-v0.4.md)和[发布说明](docs/releases/v0.4.0.md)。
 
 ```powershell
 npm ci

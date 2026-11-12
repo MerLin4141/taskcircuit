@@ -456,7 +456,8 @@ it("preserves results across Feishu failure, retries one delivery, and exposes s
     {
       cwd: f.home,
       windowsHide: true,
-      timeout: 4000,
+      // Doctor also inspects the Windows scheduled task; PowerShell startup can take several seconds on CI.
+      timeout: 20000,
       env: {
         ...isolatedEnv,
         PATH: f.home,
@@ -500,7 +501,7 @@ it("preserves results across Feishu failure, retries one delivery, and exposes s
   });
   for (const marker of [url, token, secret])
     expect(observed).not.toContain(marker);
-});
+}, 30000);
 
 it("exhausts three sends while NeedsInput remains available and answerable locally", async () => {
   let hits = 0;

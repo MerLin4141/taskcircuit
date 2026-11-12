@@ -10,6 +10,6 @@ Released. Source, Agent and Channel plugin boundaries, trusted external plugin l
 
 ## v0.4 — Automation Ecosystem
 
-In development. The branch has inbound GitHub and Generic Webhook Sources, an outbound Feishu Channel, and copyable Automation templates. See the [v0.4 Quick Start](quickstart-v0.4.md) for local setup and the [ecosystem design](design/v0.4-automation-ecosystem.md) for release-candidate gates.
+Release candidate. v0.4 includes inbound GitHub and Generic Webhook Sources, an outbound Feishu Channel, and copyable Automation templates. See the [v0.4 Quick Start](quickstart-v0.4.md) for local setup and the [ecosystem design](design/v0.4-automation-ecosystem.md) for release-candidate gates. See the [v0.4 release notes](releases/v0.4.0.md) and [upgrade guide](upgrade-v0.4.md).
 
 Longer-term possibilities include isolation, remote workers, multi-user authorization and cloud runtime.

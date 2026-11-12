@@ -28,13 +28,13 @@ TaskCircuit uses a **Trusted Local** model. The loopback Hub is not user authent
 
 Windows is the primary validated platform. Actual Windows reboot/logon and Linux process-group cleanup have not been verified. The watch stream does not expose every Event/Root/Continue transition; Automation creation requires trusted Agent, event and workspace registration. Cancellation was observed for the managed process; a complete descendant inventory was not independently verified. Real Agent deadline, response-loss, Worker crash and Hub crash were not independently injected against both CLIs.
 
-v0.3 provides Agent, Source, and Channel plugins, including explicitly configured trusted external modules. Plugin top-level code runs with local user permissions. The v0.4 development branch adds active Sources, outbound Feishu and project-specific configuration. See [plugin authoring](docs/plugin-authoring.md) and [declarative rules](docs/declarative-automation.md).
+v0.4 supports active Source API 2, Channel API 2 and existing API 1 plugins. Explicitly configured trusted external modules run with local user permissions. See [plugin authoring](docs/plugin-authoring.md) and [declarative rules](docs/declarative-automation.md).
 
-v0.3 does not provide approval workflows, ActionIntent, Outbox, an external-side-effect exactly-once guarantee, GitHub source plugins, Slack or email channels, multi-user access, RBAC, remote Workers, cloud runtime, OS sandbox, or complex token/cost budgets.
+GitHub support is inbound and Feishu sends outbound group notices. Multi-agent runtime, remote Workers, cloud runtime and multi-user/RBAC are outside v0.4.
 
 ## CLI and development
 
-Use `taskcircuit apply`, `automation create/list/show`, `event emit/list/show`, `root list/show`, `inbox`, `answer`, `watch`, `doctor`, `status`, `work`, `schedule`, and Windows `runtime`. Existing commands and `--json` remain available; consult command help for supported arguments. See [architecture](docs/architecture.md), [API](docs/api.md), [roadmap](docs/roadmap.md), [upgrade guide](docs/upgrade-v0.3.md), and [release notes](docs/releases/v0.3.0.md).
+Use `taskcircuit apply`, `automation create/list/show`, `event emit/list/show`, `root list/show`, `inbox`, `answer`, `watch`, `doctor`, `status`, `work`, `schedule`, and Windows `runtime`. Existing commands and `--json` remain available; consult command help for supported arguments. See [architecture](docs/architecture.md), [API](docs/api.md), [roadmap](docs/roadmap.md), [upgrade guide](docs/upgrade-v0.4.md), and [release notes](docs/releases/v0.4.0.md).
 
 ```powershell
 npm ci
