@@ -2,24 +2,15 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A durable autonomous loop runtime for CLI agents.
+A durable local runtime for CLI agent automation.
 
-TaskCircuit turns an event into persistent work for Codex, Claude Code, or a mock agent. The agent can continue, ask for input, wait until later, or finish while TaskCircuit retains the work across executions and process restarts.
+TaskCircuit can turn a GitHub Issue or a signed webhook into an Automation for Codex or Claude Code. It runs the Agent in your chosen project and sends completion, failure or input notices to the local console or Feishu.
 
 ```text
-Event → Automation → Root → Agent → Feedback
-                             ↑         │
-                             └─ Continue
-                                  Ask / Later / Complete / Failed / Stop
+GitHub / Webhook → TaskCircuit → Codex / Claude Code → Local console / Feishu
 ```
 
-A Root represents one automation lifecycle. A Work Item can have multiple Executions that resume the same Agent Session. A Continue is a proposal: before another run, TaskCircuit checks the Root state, authorization, active execution, maximum run count and deadline. The defaults are eight runs and two hours. Feedback cannot increase those limits or change the trusted Agent, workspace, or capabilities.
-
-## Try the mock loop
-
-No Agent login or API credential is needed. Install Node.js 24 or newer, then follow the [v0.3 Quick Start](docs/quickstart-v0.3.md) to set up trusted configuration, apply a rules file, emit an event, and inspect the result. The mock returns Continue twice and then Complete. `taskcircuit doctor`, `taskcircuit inbox`, and `taskcircuit answer` are available for diagnostics and human input.
-
-For real Agents, install and authenticate [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://code.claude.com/) yourself and configure an Agent profile and event route. Calls may consume provider quota. TaskCircuit does not perform login. See [Agent configuration](docs/agents.md) and the [Phase 6 evidence](docs/design/v0.2-phase6-real-agent-e2e-report.md).
+**Start with the [v0.4 Quick Start](docs/quickstart-v0.4.md).** Try the built-in Mock Agent locally without provider credentials, then choose a template. For real Agents, install and authenticate your CLI yourself. See [Agent configuration](docs/agents.md).
 
 ## Automation templates
 
@@ -37,7 +28,7 @@ TaskCircuit uses a **Trusted Local** model. The loopback Hub is not user authent
 
 Windows is the primary validated platform. Actual Windows reboot/logon and Linux process-group cleanup have not been verified. The watch stream does not expose every Event/Root/Continue transition; Automation creation requires trusted Agent, event and workspace registration. Cancellation was observed for the managed process; a complete descendant inventory was not independently verified. Real Agent deadline, response-loss, Worker crash and Hub crash were not independently injected against both CLIs.
 
-v0.3 provides Agent, Source, and Channel plugins, including explicitly configured trusted external modules. Plugin top-level code runs with local user permissions. The generic active Source lifecycle is not implemented. See [plugin authoring](docs/plugin-authoring.md) and [declarative rules](docs/declarative-automation.md).
+v0.3 provides Agent, Source, and Channel plugins, including explicitly configured trusted external modules. Plugin top-level code runs with local user permissions. The v0.4 development branch adds active Sources, outbound Feishu and project-specific configuration. See [plugin authoring](docs/plugin-authoring.md) and [declarative rules](docs/declarative-automation.md).
 
 v0.3 does not provide approval workflows, ActionIntent, Outbox, an external-side-effect exactly-once guarantee, GitHub source plugins, Slack or email channels, multi-user access, RBAC, remote Workers, cloud runtime, OS sandbox, or complex token/cost budgets.
 

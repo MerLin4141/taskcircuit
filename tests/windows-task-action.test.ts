@@ -25,13 +25,17 @@ function New-ScheduledTaskTrigger { param([switch]$AtLogOn, $User) return 'trigg
 function New-ScheduledTaskPrincipal { param($UserId, $LogonType, $RunLevel) return 'principal' }
 function New-ScheduledTaskSettingsSet { param($MultipleInstances, $ExecutionTimeLimit) return 'settings' }
 function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Principal,$Settings,$Description,[switch]$Force) [Console]::Error.WriteLine(($Action | ConvertTo-Json -Compress)) }
-& $env:TC_TEST_SCRIPT -Action install -Name TaskCircuit-Test-Fake -Node 'C:\\workspace\\node.exe' -Launcher 'C:\\workspace\\launcher.js' -RuntimeHome 'C:\\workspace\\state' -AppDir 'C:\\workspace' -JobScript 'C:\\workspace\\job.ps1'
+& $env:TC_TEST_SCRIPT -Action install -Name TaskCircuit-Test-Fake -Node 'C:\\workspace\\node.exe' -Launcher 'C:\\workspace\\launcher.js' -RuntimeHome 'C:\\workspace\\state' -AppDir 'C:\\workspace' -JobScript 'C:\\workspace\\job.ps1' -ConfigPath 'C:\\User Automation Project\\taskcircuit.config.json'
 `;
       const result = spawnSync(
         powershell,
         ["-NoProfile", "-NonInteractive", "-Command", harness],
         {
-          env: { ...process.env, TC_TEST_SCRIPT: script },
+          env: {
+            ...process.env,
+            TC_TEST_SCRIPT: script,
+            TASKCIRCUIT_GITHUB_WEBHOOK_SECRET: "synthetic-task-argument-secret",
+          },
           encoding: "utf8",
           windowsHide: true,
         },
@@ -54,6 +58,10 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Principal,$S
         /(?:^|\s)-WindowStyle\s+Hidden(?:\s|$)/i,
       );
       expect(action.arguments).toMatch(/-File\s+"C:\\workspace\\job\.ps1"/i);
+      expect(action.arguments).toContain(
+        '-ConfigPath "C:\\User Automation Project\\taskcircuit.config.json"',
+      );
+      expect(action.arguments).not.toContain("synthetic-task-argument-secret");
       expect(action.workingDirectory).toBe("C:\\workspace");
     });
   },

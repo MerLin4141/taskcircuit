@@ -13,7 +13,18 @@ import {
   resolveCurrentStore,
   StorageGenerationError,
 } from "./storage/generation.js";
-import { defaultConfig, loadConfig } from "./config.js";
+import {
+  readSelectedConfig,
+  resolveConfigPath,
+  SetupError,
+  takeConfigFlag,
+} from "./config-path.js";
+import {
+  inspectIntegrations,
+  inspectWorkspaces,
+  validateStartupIntegrations,
+} from "./config-preflight.js";
+import { startupCode, startupHint } from "./startup-error.js";
 import { workOnce } from "./worker.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -67,18 +78,39 @@ async function api(
   path: string,
   method = "GET",
   data?: unknown,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const response = await fetch(new URL(path, base), {
     method,
     headers: { "content-type": "application/json" },
     body: data === undefined ? undefined : JSON.stringify(data),
+    signal,
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`${response.status}: ${text}`);
   return text ? JSON.parse(text) : null;
 }
 const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
+const configHelp =
+  "--config <path> > TASKCIRCUIT_CONFIG > ./taskcircuit.config.json > built-in defaults";
 async function main(): Promise<void> {
+  if (
+    ["hub", "worker", "doctor"].includes(command ?? "") &&
+    args.some((arg) => arg === "--help" || arg === "-h")
+  ) {
+    console.log(
+      "Usage: taskcircuit " +
+        command +
+        (command === "worker"
+          ? " [--once]"
+          : command === "doctor"
+            ? " [--json]"
+            : "") +
+        " [--config <path>]\n" +
+        configHelp,
+    );
+    return;
+  }
   if (command === "apply") {
     if (args.includes("--help") || args.includes("-h")) {
       console.log(
@@ -99,6 +131,13 @@ async function main(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ document, dryRun }),
+    }).catch(() => {
+      throw new SetupError(
+        "hub_unavailable",
+        "无法连接 TaskCircuit Hub " +
+          base +
+          "。请先启动 Hub 或 Windows Runtime，再运行 taskcircuit apply。",
+      );
     });
     const text = await response.text();
     const value: unknown = text ? JSON.parse(text) : null;
@@ -271,15 +310,14 @@ async function main(): Promise<void> {
   if (command === "hub") {
     const home =
       process.env.TASKCIRCUIT_HOME ?? join(homedir(), ".taskcircuit");
+    const configPath = resolveConfigPath(takeConfigFlag(args));
+    const config = readSelectedConfig(configPath);
+    validateStartupIntegrations(config, port);
     mkdirSync(join(home, "logs"), { recursive: true });
-    const configPath = join(process.cwd(), "taskcircuit.config.json");
-    const config = existsSync(configPath)
-      ? loadConfig(configPath)
-      : defaultConfig;
     const registry = createHubPluginRegistry();
     await loadTrustedPlugins(
       registry,
-      configPath,
+      configPath ?? join(process.cwd(), "taskcircuit.config.json"),
       config.plugins?.hub ?? [],
       "hub",
     );
@@ -374,14 +412,12 @@ async function main(): Promise<void> {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     const registry = createWorkerPluginRegistry();
-    const configPath = join(process.cwd(), "taskcircuit.config.json");
-    const config = existsSync(configPath)
-      ? loadConfig(configPath)
-      : defaultConfig;
+    const configPath = resolveConfigPath(takeConfigFlag(args));
+    const config = readSelectedConfig(configPath);
     removeWorkerSecrets(config);
     await loadTrustedPlugins(
       registry,
-      configPath,
+      configPath ?? join(process.cwd(), "taskcircuit.config.json"),
       config.plugins?.worker ?? [],
       "worker",
     );
@@ -459,12 +495,34 @@ async function main(): Promise<void> {
     const home =
       process.env.TASKCIRCUIT_HOME ?? join(homedir(), ".taskcircuit");
     const action = args[0];
-    if (action === "--help" || action === "-h") {
+    if (action === "--help" || action === "-h" || !action) {
       console.log(
-        "用法: taskcircuit runtime install | start | stop | restart | status | uninstall",
+        "Usage: taskcircuit runtime install [--config <path>] | run [--config <path>] | start | stop | restart | status [--json] | uninstall\n" +
+          configHelp +
+          "\nInstall pins the selected config for later starts.",
       );
       return;
     }
+    if (
+      ["install", "run"].includes(action) &&
+      args.slice(1).some((arg) => arg === "--help" || arg === "-h")
+    ) {
+      console.log(
+        "Usage: taskcircuit runtime " +
+          action +
+          " [--config <path>]\n" +
+          configHelp +
+          (action === "install"
+            ? "\nInstall pins the selected config for later starts."
+            : ""),
+      );
+      return;
+    }
+    if (args.includes("--config") && !["install", "run"].includes(action))
+      throw new SetupError(
+        "config_argument_invalid",
+        "请在 runtime install 或 runtime run 使用 --config。",
+      );
     const waitStartupTask = async () => {
       const deadline = Date.now() + 20000;
       while (Date.now() < deadline) {
@@ -494,15 +552,19 @@ async function main(): Promise<void> {
       }
     };
     if (action === "run") {
-      process.exitCode = await runContained(home);
+      const configPath = resolveConfigPath(takeConfigFlag(args));
+      readSelectedConfig(configPath);
+      process.exitCode = await runContained(home, configPath);
       return;
     }
     if (action === "install") {
-      print(await task("install", home));
+      const configPath = resolveConfigPath(takeConfigFlag(args));
+      readSelectedConfig(configPath);
+      print(await task("install", home, undefined, undefined, configPath));
       return;
     }
     if (action === "status") {
-      const startup = await task("inspect", home);
+      const { arguments: _arguments, ...startup } = await task("inspect", home);
       const state = await readRuntimeStatus(home);
       let health: unknown = null;
       let workers: unknown = [];
@@ -513,6 +575,10 @@ async function main(): Promise<void> {
       const result = {
         windowsStartupTask: startup,
         runtime: state,
+        configPath: Object.hasOwn(state, "configPath")
+          ? state.configPath
+          : startup.configPath,
+        logPath: join(home, "logs", "runtime.log"),
         hub: health,
         workers,
         home,
@@ -579,11 +645,88 @@ async function main(): Promise<void> {
       process.env.TASKCIRCUIT_HOME ?? join(homedir(), ".taskcircuit");
     const report: Record<string, unknown> = {
       node: { status: "PASS", version: process.version },
-      home: { status: existsSync(home) ? "PASS" : "WARN", path: home },
+      home: { status: "WARN", path: home },
       sqlite: { status: "WARN", message: "Not checked" },
-      codex: { status: "WARN" },
-      claude: { status: "WARN" },
+      codex: { status: "PASS", message: "No Codex profile configured" },
+      claude: { status: "PASS", message: "No Claude profile configured" },
     };
+    const summarize = (detail: { status: string }[]) => ({
+      status: detail.some((entry) => entry.status === "FAIL")
+        ? "FAIL"
+        : detail.some((entry) => entry.status === "WARN")
+          ? "WARN"
+          : "PASS",
+      detail,
+    });
+    try {
+      const path = resolveConfigPath(takeConfigFlag(args));
+      const config = readSelectedConfig(path);
+      report.config = {
+        status: "PASS",
+        path,
+        message: path ?? "Built-in defaults",
+      };
+      const { sources, channels, ingress } = inspectIntegrations(
+        config,
+        port,
+        true,
+      );
+      report.workspaces = summarize(inspectWorkspaces(config));
+      report.sources = summarize(sources);
+      report.channels = summarize(channels);
+      report.integrationIngress = ingress;
+      const profiles = Object.entries(config.agents).map(([id, profile]) => ({
+        id,
+        implementation: profile.adapter,
+      }));
+      for (const kind of ["codex", "claude"] as const) {
+        if (!profiles.some((profile) => profile.implementation === kind))
+          continue;
+        try {
+          const executable = resolveCli(kind);
+          const supported = await detectCli(
+            kind,
+            new ProcessRunner(),
+            process.cwd(),
+            executable,
+          );
+          report[kind] = {
+            status: supported ? "PASS" : "WARN",
+            message: supported
+              ? "CLI detected; authentication not verified"
+              : "CLI detected but required options were not confirmed",
+          };
+        } catch {
+          report[kind] = {
+            status: "WARN",
+            message:
+              "CLI unavailable. Install the CLI or select an available Agent profile.",
+          };
+        }
+      }
+      report.agentProfiles = summarize(
+        profiles.map((profile) => {
+          const check = report[profile.implementation] as
+            { status?: string; message?: string } | undefined;
+          return {
+            ...profile,
+            status: check?.status ?? "PASS",
+            message:
+              profile.implementation === "mock"
+                ? "Built-in Mock"
+                : (check?.message ??
+                  "External plugin declared; checked at startup"),
+          };
+        }),
+      );
+    } catch (error) {
+      const safe = error instanceof SetupError;
+      report.config = {
+        status: "FAIL",
+        code: safe ? error.code : "config_invalid",
+        message: safe ? error.message : "配置预检失败，请检查配置文件。",
+      };
+    }
     try {
       await import("node:sqlite");
       report.sqlite = { status: "PASS", message: "Built-in SQLite available" };
@@ -603,32 +746,48 @@ async function main(): Promise<void> {
         message: "Home is missing or not writable",
       };
     }
+    const read = (path: string) =>
+      api(path, "GET", undefined, AbortSignal.timeout(1500));
     try {
-      report.hub = { status: "PASS", detail: await api("/api/health") };
-      const diagnostics = (await api("/api/diagnostics")) as {
+      report.hub = { status: "PASS", detail: await read("/api/health") };
+      const diagnostics = (await read("/api/diagnostics")) as {
         schema: number;
         agentProfiles: string[];
+        integrationIngress?: unknown;
       };
       report.schema = {
         status: "PASS",
-        message: `Schema ${diagnostics.schema}`,
+        message: "Schema " + diagnostics.schema,
       };
       report.agentProfiles = {
-        status: "PASS",
+        ...(report.agentProfiles as object),
+        status:
+          (report.agentProfiles as { status?: string } | undefined)?.status ??
+          "PASS",
         message: diagnostics.agentProfiles.join(", ") || "No profiles",
       };
-      const entries = (await api("/api/workers")) as { state: string }[];
+      if (diagnostics.integrationIngress)
+        report.runtimeIngress = {
+          status: "PASS",
+          detail: diagnostics.integrationIngress,
+          message: "Loopback integration listener active",
+        };
+      const entries = (await read("/api/workers")) as { state: string }[];
       report.workers = {
         status: entries.some((x) => x.state === "online") ? "PASS" : "WARN",
         detail: entries,
       };
     } catch {
-      report.hub = { status: "WARN", message: "Hub unavailable" };
+      report.hub ??= {
+        status: "WARN",
+        message:
+          "Hub unavailable. Start the Hub or Windows Runtime when ready.",
+      };
       report.workers = { status: "WARN", message: "Worker status unavailable" };
     }
     if (process.platform === "win32") {
       try {
-        const info = await task("inspect", home);
+        const { arguments: _arguments, ...info } = await task("inspect", home);
         report.windowsStartupTask = {
           status: info.installed ? "PASS" : "WARN",
           detail: info,
@@ -640,29 +799,11 @@ async function main(): Promise<void> {
         };
       }
     }
-    for (const kind of ["codex", "claude"] as const) {
-      try {
-        resolveCli(kind);
-        const supported = await detectCli(
-          kind,
-          new ProcessRunner(),
-          process.cwd(),
-        );
-        report[kind] = {
-          status: supported ? "PASS" : "WARN",
-          message: supported
-            ? "CLI detected; authentication not verified"
-            : "CLI detected but required options were not confirmed",
-        };
-      } catch {
-        report[kind] = { status: "WARN", message: "CLI unavailable" };
-      }
-    }
     if (jsonMode) print(report);
     else console.log(formatDoctor(report));
     if (
       Object.values(report).some(
-        (v) => (v as { status?: string }).status === "FAIL",
+        (value) => (value as { status?: string }).status === "FAIL",
       )
     )
       process.exitCode = 1;
@@ -891,18 +1032,45 @@ async function main(): Promise<void> {
     return;
   }
   console.log(
-    "用法: taskcircuit apply <文件> [--dry-run] [--json] | hub | worker [--once] | automation create/list/show | root list/show | event emit/show/list | emit <事件类型> | work create <事件类型> | work <工作ID> | answer <问题ID> <回答> | status | inbox | watch [--after 序号] | doctor | runtime | schedule list/add/pause/resume/cancel",
+    [
+      "TaskCircuit — durable local agent automation",
+      "Get started: doctor [--config <path>] | apply <file> [--dry-run]",
+      "Run: hub | worker [--once] | runtime",
+      "Observe: status | root list/show | inbox | answer | watch",
+      "Manage: automation create/list/show | event emit/show/list | emit | work | schedule",
+      "Use <command> --help for details.",
+    ].join("\n"),
   );
 }
-main().catch((e) => {
-  console.error(
-    e instanceof StorageGenerationError ||
-      e instanceof PluginRegistrationError ||
-      e instanceof PluginNotFoundError
-      ? `${e.code}: ${e.message}`
-      : e instanceof Error
-        ? e.message
-        : "运行失败",
-  );
+main().catch((error) => {
+  const code = startupCode(error);
+  if (
+    typeof process.send === "function" &&
+    (command === "hub" || command === "worker")
+  ) {
+    console.error(
+      JSON.stringify({
+        component: "startup",
+        code:
+          code ??
+          (command === "hub" ? "hub_start_failed" : "worker_start_failed"),
+      }),
+    );
+  } else if (
+    error instanceof SetupError ||
+    error instanceof StorageGenerationError ||
+    error instanceof PluginRegistrationError ||
+    error instanceof PluginNotFoundError
+  ) {
+    console.error(error.code + ": " + error.message);
+  } else {
+    console.error(
+      code
+        ? code + ": " + startupHint(code)
+        : error instanceof Error
+          ? error.message
+          : "运行失败",
+    );
+  }
   process.exitCode = 1;
 });

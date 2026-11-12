@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$Node,[Parameter(Mandatory=$true)][string]$Launcher,[Parameter(Mandatory=$true)][string]$RuntimeHome,[Parameter(Mandatory=$true)][string]$AppDir,[string]$WorkspaceRoot,[switch]$WaitForBootstrap)
+param([Parameter(Mandatory=$true)][string]$Node,[Parameter(Mandatory=$true)][string]$Launcher,[Parameter(Mandatory=$true)][string]$RuntimeHome,[Parameter(Mandatory=$true)][string]$AppDir,[string]$WorkspaceRoot,[switch]$WaitForBootstrap,[string]$ConfigPath,[switch]$UseDefaultConfig)
 $ErrorActionPreference = 'Stop'
 if($WaitForBootstrap -and [Console]::ReadLine() -ne 'start'){throw 'Bootstrap handshake failed'}
 trap {
@@ -25,6 +25,8 @@ $jobHandle=[TaskCircuitJob]::Create()
 $process=$null
 try {
  $env:TASKCIRCUIT_HOME=$RuntimeHome
+ if($ConfigPath){$env:TASKCIRCUIT_CONFIG=$ConfigPath;Remove-Item Env:TASKCIRCUIT_CONFIG_DEFAULT -ErrorAction SilentlyContinue}
+ elseif($UseDefaultConfig){Remove-Item Env:TASKCIRCUIT_CONFIG -ErrorAction SilentlyContinue;$env:TASKCIRCUIT_CONFIG_DEFAULT='1'}
  if($WorkspaceRoot){$env:TASKCIRCUIT_WORKSPACE_ROOT=$WorkspaceRoot}
  $start=[System.Diagnostics.ProcessStartInfo]::new()
  $start.FileName=$Node

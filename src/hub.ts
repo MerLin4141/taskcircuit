@@ -883,6 +883,14 @@ export function createHub(
   hub.get("/api/diagnostics", async () => ({
     schema: Number(get("SELECT MAX(version) v FROM schema_migrations")?.v),
     agentProfiles: Object.keys(config.agents).sort(),
+    ...(ingress
+      ? {
+          integrationIngress: {
+            host: "127.0.0.1",
+            port: config.integrationIngress?.port,
+          },
+        }
+      : {}),
   }));
   const scheduleWork = (
     workId: string,

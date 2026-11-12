@@ -2,6 +2,8 @@ import type { Config } from "../config.js";
 
 const runtimeNames = new Set([
   "TASKCIRCUIT_HOME",
+  "TASKCIRCUIT_CONFIG",
+  "TASKCIRCUIT_CONFIG_DEFAULT",
   "TASKCIRCUIT_PORT",
   "TASKCIRCUIT_SCHEDULER_INTERVAL_MS",
   "TASKCIRCUIT_WORKSPACE_ROOT",

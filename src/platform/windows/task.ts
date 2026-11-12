@@ -22,6 +22,7 @@ export async function task(
   home: string,
   name = taskName(home),
   workspaceRoot?: string,
+  configPath?: string | null,
 ): Promise<Record<string, unknown>> {
   if (process.platform !== "win32")
     throw new Error("当前平台不支持 Windows Runtime 集成");
@@ -62,6 +63,12 @@ export async function task(
       job,
     );
   }
+  if (action === "install" && configPath !== undefined)
+    args.push(
+      ...(configPath === null
+        ? ["-UseDefaultConfig"]
+        : ["-ConfigPath", configPath]),
+    );
   if (workspaceRoot) args.push("-WorkspaceRoot", resolve(workspaceRoot));
   const { stdout } = await run(powershell, args, {
     windowsHide: true,
@@ -70,7 +77,10 @@ export async function task(
   });
   return JSON.parse(stdout) as Record<string, unknown>;
 }
-export async function runContained(home: string): Promise<number> {
+export async function runContained(
+  home: string,
+  configPath: string | null,
+): Promise<number> {
   if (process.platform !== "win32")
     throw new Error("当前平台不支持 Windows Runtime 集成");
   const powershell = join(
@@ -99,6 +109,9 @@ export async function runContained(home: string): Promise<number> {
         resolve(home),
         "-AppDir",
         root,
+        ...(configPath === null
+          ? ["-UseDefaultConfig"]
+          : ["-ConfigPath", configPath]),
       ],
       { stdio: "ignore", windowsHide: true, shell: false, detached: true },
     );

@@ -3,7 +3,6 @@ import { createServer, connect } from "node:net";
 import { randomUUID, randomBytes } from "node:crypto";
 import {
   mkdirSync,
-  existsSync,
   writeFileSync,
   renameSync,
   readFileSync,
@@ -13,7 +12,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipePath } from "./runtime.js";
 import { RuntimeLog } from "./log.js";
-import { defaultConfig, loadConfig } from "../../config.js";
+import { readSelectedConfig, resolveConfigPath } from "../../config-path.js";
+import { startupCode, startupHint } from "../../startup-error.js";
 import { workerEnvironment } from "../../integrations/environment.js";
 const home = process.env.TASKCIRCUIT_HOME;
 if (!home) throw new Error("未配置 Runtime Home");
@@ -35,6 +35,25 @@ mkdirSync(dir, { recursive: true });
 const metadataPath = join(dir, "runtime.json");
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const cli = join(root, "dist", "cli.js");
+const selection = (() => {
+  try {
+    const configPath = resolveConfigPath(undefined, process.env, root);
+    return { configPath, config: readSelectedConfig(configPath) };
+  } catch (error) {
+    const code = startupCode(error) ?? "config_invalid";
+    log.write("runtime", "error", code + ": " + startupHint(code));
+    process.exit(1);
+  }
+})();
+const { configPath, config } = selection;
+const env: NodeJS.ProcessEnv = { ...process.env, TASKCIRCUIT_HOME: home };
+if (configPath === null) {
+  delete env.TASKCIRCUIT_CONFIG;
+  env.TASKCIRCUIT_CONFIG_DEFAULT = "1";
+} else {
+  env.TASKCIRCUIT_CONFIG = configPath;
+  delete env.TASKCIRCUIT_CONFIG_DEFAULT;
+}
 const pipe = pipePath(home);
 let hub: ChildProcess | undefined,
   worker: ChildProcess | undefined,
@@ -113,6 +132,7 @@ const server = createServer((socket) => {
         socket.end(
           JSON.stringify({
             runtimeId,
+            configPath,
             launcherPid: process.pid,
             hubPid: hub?.pid ?? null,
             workerPid: worker?.pid ?? null,
@@ -142,6 +162,7 @@ writeFileSync(
     runtimeId,
     token,
     pid: process.pid,
+    configPath,
     startedAt: new Date().toISOString(),
   }),
   { mode: 0o600 },
@@ -167,17 +188,9 @@ if (busy) {
   process.exitCode = 1;
 } else {
   const start = (name: "hub" | "worker") => {
-    const configPath = join(root, "taskcircuit.config.json");
-    const env = { ...process.env, TASKCIRCUIT_HOME: home };
     const child = fork(cli, [name], {
       cwd: root,
-      env:
-        name === "worker"
-          ? workerEnvironment(
-              existsSync(configPath) ? loadConfig(configPath) : defaultConfig,
-              env,
-            )
-          : env,
+      env: name === "worker" ? workerEnvironment(config, env) : env,
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       windowsHide: true,
     });
@@ -189,8 +202,18 @@ if (busy) {
             const value = JSON.parse(line) as {
               component?: string;
               message?: string;
+              code?: string;
             };
-            if (value.component === "notification")
+            if (value.component === "startup") {
+              const hint = startupHint(value.code);
+              log.write(
+                name,
+                "error",
+                hint
+                  ? value.code + ": " + hint
+                  : name + " 启动失败。请运行 taskcircuit doctor。",
+              );
+            } else if (value.component === "notification")
               log.write("notification", "info", "本地通知已投递");
             else if (
               [

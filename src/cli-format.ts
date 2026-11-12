@@ -155,6 +155,7 @@ export function formatRuntimeStatus(value: unknown): string {
     "Launcher",
     `  State: ${text(runtime.runtime)}`,
     `  PID: ${text(runtime.launcherPid)}`,
+    `  Config: ${d.configPath === null ? "built-in defaults" : text(d.configPath)}`,
     "",
     "Hub",
     `  Status: ${hub.ok ? "healthy" : "unavailable"}`,
@@ -163,7 +164,12 @@ export function formatRuntimeStatus(value: unknown): string {
     `  Online: ${workers.filter((w) => w.state === "online").length}`,
     `  Stale: ${stale}`,
     ...(stale ? [`Warning: ${stale} stale worker presence record(s).`] : []),
-    ...(hub.ok ? [] : ["Run `taskcircuit doctor` for diagnostics."]),
+    ...(hub.ok
+      ? []
+      : [
+          "Run `taskcircuit doctor` for diagnostics.",
+          `Runtime log: ${text(d.logPath)}`,
+        ]),
     "",
     "Home",
     `  ${text(d.home)}`,
@@ -182,7 +188,32 @@ export function formatDoctor(value: unknown): string {
             ? `${list(check.detail).filter((w) => w.state === "online").length} online`
             : undefined;
       const summary = `[${text(check.status)}] ${key}  ${text(check.message ?? check.version ?? check.path ?? detail)}`;
-      if (key !== "hub") return summary;
+      if (key !== "hub")
+        return [
+          summary,
+          ...list(check.detail)
+            .filter(
+              (entry) =>
+                typeof entry.id === "string" &&
+                typeof entry.status === "string",
+            )
+            .map((entry) =>
+              [
+                "  [" +
+                  text(entry.status) +
+                  "] " +
+                  text(entry.id) +
+                  (entry.implementation
+                    ? " · " + text(entry.implementation)
+                    : "") +
+                  (entry.message ? " · " + text(entry.message) : ""),
+                ...list(entry.references).map(
+                  (reference) =>
+                    "    " + text(reference.name) + " " + text(reference.state),
+                ),
+              ].join("\n"),
+            ),
+        ].join("\n");
       const { sources, channels } = row(check.detail);
       return [
         summary,

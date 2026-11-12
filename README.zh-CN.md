@@ -2,24 +2,15 @@
 
 [English](README.md) | **简体中文**
 
-面向 CLI Agent 的持久化自主循环运行时。
+面向 CLI Agent 的本地持久化自动化运行时。
 
-TaskCircuit 让事件触发 Codex、Claude Code 或模拟 Agent 的持续工作。Agent 可以继续、提问、稍后再执行或完成；任务状态可跨执行和进程重启保留。
+TaskCircuit 可以把 GitHub Issue 或签名 Webhook 变成自动化，让 Codex 或 Claude Code 在指定的项目目录中工作，并通过本地控制台或飞书报告完成、失败或待回答的问题。
 
 ```text
-事件 → 自动化 → Root → Agent → 反馈
-                       ↑       │
-                       └─ 继续
-                          提问 / 稍后 / 完成 / 失败 / 停止
+GitHub / Webhook → TaskCircuit → Codex / Claude Code → 本地控制台 / 飞书
 ```
 
-Root 表示一次自动化生命周期。同一个 Work Item 可以有多次 Execution，并继续同一个 Agent Session。Continue 是建议：再次启动前，系统检查 Root 状态、授权、活动执行、最大运行次数和截止时间；默认最多 8 次、期限 2 小时。Agent 不能通过反馈提高限制、延长期限或更换可信 Agent、工作目录和能力。
-
-## 先试模拟循环
-
-不需要 Agent 登录或 API 密钥。安装 Node.js 24 或更新版本，按照 [v0.3 快速开始](docs/quickstart-v0.3.md) 配置可信本机环境、应用规则文件、发送事件并查看结果。模拟 Agent 会连续两次 Continue，然后 Complete。人工提问使用 `taskcircuit inbox` 和 `taskcircuit answer`。
-
-使用真实 Agent 时，请自行安装并登录 [Codex CLI](https://github.com/openai/codex) 或 [Claude Code](https://code.claude.com/)，并配置 Agent 与事件路由；调用可能消耗服务额度。TaskCircuit 不代替用户登录。详见 [Agent 配置](docs/agents.md) 和 [Phase 6 验证记录](docs/design/v0.2-phase6-real-agent-e2e-report.md)。
+**从 [v0.4 快速开始](docs/quickstart-v0.4.md) 入手。** 先用内置 Mock 在本地验证，再选择自动化模板。使用真实 Agent 时，请自行安装并登录对应 CLI。详见 [Agent 配置](docs/agents.md)。
 
 ## 自动化模板
 
@@ -37,7 +28,7 @@ TaskCircuit 使用 **Trusted Local** 模型。回环地址不是用户认证，�
 
 Windows 是主要验证平台。尚未验证实际 Windows 重启/登录和 Linux 进程组清理。Watch 不能展示全部 Event/Root/Continue 过程；创建自动化前需要注册可信 Agent、事件和工作目录。取消已观察到受管理进程收到停止信号，但未独立盘点全部后代进程。真实 Agent 的 deadline、响应丢失、Worker 崩溃及 Hub 崩溃未分别对两种 CLI 注入验证。
 
-v0.3 提供 Agent、Source 和 Channel 插件，支持显式配置的可信外部模块。外部插件的顶层代码以本机用户权限运行；通用主动 Source 生命周期尚未实现。详见[插件说明](docs/plugin-authoring.md)和[声明式规则](docs/declarative-automation.md)。
+v0.3 提供 Agent、Source 和 Channel 插件，支持显式配置的可信外部模块。外部插件的顶层代码以本机用户权限运行；v0.4 开发分支加入主动 Source、飞书通知和项目级配置选择。详见[插件说明](docs/plugin-authoring.md)和[声明式规则](docs/declarative-automation.md)。
 
 v0.3 不提供审批流程、ActionIntent、Outbox、外部副作用恰好一次保证、GitHub Source 插件、Slack 或邮件通道、多用户、RBAC、远程 Worker、云运行时、OS 沙箱或复杂 token/成本预算。
 

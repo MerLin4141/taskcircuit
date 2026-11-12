@@ -1,5 +1,6 @@
-param([Parameter(Mandatory=$true)][ValidateSet('install','inspect','start','uninstall')][string]$Action,[Parameter(Mandatory=$true)][string]$Name,[string]$Node,[string]$Launcher,[string]$RuntimeHome,[string]$AppDir,[string]$JobScript,[string]$WorkspaceRoot)
+param([Parameter(Mandatory=$true)][ValidateSet('install','inspect','start','uninstall')][string]$Action,[Parameter(Mandatory=$true)][string]$Name,[string]$Node,[string]$Launcher,[string]$RuntimeHome,[string]$AppDir,[string]$JobScript,[string]$WorkspaceRoot,[string]$ConfigPath,[switch]$UseDefaultConfig)
 $ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 if($Name -notmatch '^TaskCircuit(?:-[a-zA-Z0-9-]+)?$'){throw 'Invalid task name'}
 if($Action -eq 'install') {
  $existing=Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
@@ -9,6 +10,8 @@ if($Action -eq 'install') {
  function Quote-TaskArg([string]$Value) { return '"' + ($Value -replace '(\\+)$','$1$1') + '"' }
  $arguments='-NoProfile -NonInteractive -WindowStyle Hidden -File ' + (Quote-TaskArg $JobScript) + ' -Node ' + (Quote-TaskArg $Node) + ' -Launcher ' + (Quote-TaskArg $Launcher) + ' -RuntimeHome ' + (Quote-TaskArg $RuntimeHome) + ' -AppDir ' + (Quote-TaskArg $AppDir)
  if($WorkspaceRoot){if($WorkspaceRoot.Contains('"')){throw 'Invalid workspace path'};$arguments += ' -WorkspaceRoot ' + (Quote-TaskArg $WorkspaceRoot)}
+ if($ConfigPath){if($ConfigPath.Contains('"') -or -not [IO.Path]::IsPathRooted($ConfigPath)){throw 'Invalid config path'};$arguments += ' -ConfigPath ' + (Quote-TaskArg $ConfigPath)}
+ elseif($UseDefaultConfig){$arguments += ' -UseDefaultConfig'}
  $source=Join-Path $PSScriptRoot 'bootstrap.cs'
  $hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($source))).Replace('-','').Substring(0,16).ToLowerInvariant()
  $runtimeDir=Join-Path $RuntimeHome 'runtime'
@@ -28,9 +31,16 @@ if($Action -eq 'install') {
  $task=Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
  if(-not $task){[pscustomobject]@{installed=$false;name=$Name}|ConvertTo-Json -Compress;exit 0}
  $info=Get-ScheduledTaskInfo -TaskName $Name
+ $arguments=$task.Actions[0].Arguments
+ $pinned=@{}
+ if($task.Description -eq 'TaskCircuit managed startup task'){
+  if($arguments -match '(?:^|\s)-ConfigPath "([^"]+)"'){$pinned.configPath=$Matches[1]}
+  elseif($arguments -match '(?:^|\s)-UseDefaultConfig(?:\s|$)'){$pinned.configPath=$null}
+ }
  $isCurrentUser=$false
  try { $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $account=$task.Principal.UserId; if($account -match '^S-1-'){$taskSid=[System.Security.Principal.SecurityIdentifier]::new($account)}else{$taskSid=([System.Security.Principal.NTAccount]::new($account)).Translate([System.Security.Principal.SecurityIdentifier])};$isCurrentUser=$sid.Equals($taskSid) } catch { $isCurrentUser=$false }
- [pscustomobject]@{installed=$true;owned=($task.Description -eq 'TaskCircuit managed startup task');currentUser=$isCurrentUser;name=$Name;state=[string]$task.State;lastTaskResult=$info.LastTaskResult;lastRunTime=$info.LastRunTime.ToString('o');execute=$task.Actions[0].Execute;arguments=$task.Actions[0].Arguments;trigger=[string]$task.Triggers[0].CimClass.CimClassName;logonType=[string]$task.Principal.LogonType;runLevel=[string]$task.Principal.RunLevel}|ConvertTo-Json -Compress
+ $result=@{installed=$true;owned=($task.Description -eq 'TaskCircuit managed startup task');currentUser=$isCurrentUser;name=$Name;state=[string]$task.State;lastTaskResult=$info.LastTaskResult;lastRunTime=$info.LastRunTime.ToString('o');execute=$task.Actions[0].Execute;arguments=$task.Actions[0].Arguments;trigger=[string]$task.Triggers[0].CimClass.CimClassName;logonType=[string]$task.Principal.LogonType;runLevel=[string]$task.Principal.RunLevel}
+ [pscustomobject]($result + $pinned)|ConvertTo-Json -Compress
 } elseif($Action -eq 'start') {
  $existing=Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
  if(-not $existing){throw 'Windows Startup Task is not installed'}
